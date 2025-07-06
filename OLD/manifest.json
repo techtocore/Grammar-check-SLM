@@ -1,0 +1,55 @@
+{
+    "manifest_version": 3,
+    "name": "Grammar Check SLM",
+    "version": "0.1.0",
+    "description": "A simple grammar checker using a local SLM.",
+    "permissions": [
+        "scripting",
+        "activeTab",
+        "storage",
+        "alarms"
+    ],
+    "background": {
+        "service_worker": "background.js",
+        "type": "module"
+    },
+    "content_security_policy": {
+        "extension_pages": "script-src 'self'; object-src 'self' 'wasm-unsafe-eval'"
+    },
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "*.js",
+                "*.wasm"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
+        }
+    ],
+    "action": {
+        "default_popup": "popup.html"
+    },
+    "icons": {
+        "16": "icons/icon16.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
+    },
+    "host_permissions": [
+        "<all_urls>"
+    ],
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "type": "module",
+            "css": [
+                "style.css"
+            ]
+        }
+    ]
+}
