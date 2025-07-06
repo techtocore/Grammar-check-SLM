@@ -1,4 +1,3 @@
-
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -22,6 +21,14 @@ const config = {
     output: {
         path: path.resolve(__dirname, 'build'),
         filename: '[name].js',
+    },
+    module: {
+        rules: [
+            {
+                test: /\.css$/i,
+                use: ['style-loader', 'css-loader'],
+            },
+        ],
     },
     plugins: [
         new HtmlWebpackPlugin({
