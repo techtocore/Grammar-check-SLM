@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Grammar Check Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            background: #f7f9fb;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            background: #fff;
+            padding: 2rem 2.5rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.07);
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            color: #333;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+
+        .editable-area {
+            width: 80%;
+            min-height: 140px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 1rem;
+            font-size: 1rem;
+            resize: vertical;
+            background: #f9fafb;
+            transition: border 0.2s;
+            outline: none;
+            margin: 0 auto;
+            text-align: left;
+            display: block;
+        }
+
+        .editable-area:focus {
+            border-color: #2563eb;
+            background: #fff;
+        }
+
+        .hint {
+            color: #6b7280;
+            font-size: 0.95rem;
+            margin-top: 0.75rem;
+        }
+
+        /* This is our extension's CSS which will be injected by Chrome */
+        .grammar-mistake {
+            text-decoration: underline;
+            text-decoration-color: #ff5252;
+            text-decoration-thickness: 2px;
+            background-color: #ff525230;
+            cursor: pointer;
+        }
+
+        .grammar-mistake:hover {
+            background-color: #ff525250;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Grammar Check Test Box</h1>
+        <p>Type in the box below. Try typing "teh" or "wierd". The check will trigger 1 second after you stop typing.
+        </p>
+        <div class="editable-area" id="grammar-check-input" placeholder="Type or paste your text here..."
+            contenteditable="true"></div>
+        <div class="hint">Use this box to test your grammar checking extension.</div>
+    </div>
+</body>
+
+</html>

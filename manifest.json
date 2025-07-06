@@ -1,4 +1,3 @@
-
 {
   "manifest_version": 3,
   "name": "Grammar Check SLM",
@@ -6,8 +5,12 @@
   "description": "A simple grammar checker using a local SLM.",
   "permissions": [
     "scripting",
-    "activeTab"
+    "activeTab",
+    "storage"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -24,8 +27,8 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"]
+      "js": ["content.js"],
+      "css": ["style.css"]
     }
   ]
 }
-

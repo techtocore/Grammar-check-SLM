@@ -1,0 +1,13 @@
+
+.grammar-mistake {
+  text-decoration: underline;
+  text-decoration-color: #ff5252;
+  text-decoration-thickness: 2px;
+  background-color: #ff525230;
+  cursor: pointer;
+}
+
+.grammar-mistake:hover {
+  background-color: #ff525250;
+}
+
