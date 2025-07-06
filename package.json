@@ -1,13 +1,13 @@
 {
-  "name": "extension",
-  "version": "0.0.1",
-  "description": "Transformers.js | Sample browser extension",
+  "name": "grammar-check-slm",
+  "version": "0.1.0",
+  "description": "A simple grammar checker extension using a local SLM.",
   "scripts": {
     "build": "webpack",
     "dev": "webpack --watch"
   },
   "type": "module",
-  "author": "Xenova",
+  "author": "techtocore",
   "license": "MIT",
   "devDependencies": {
     "copy-webpack-plugin": "^13.0.0",

@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "extension",
-  "description": "Transformers.js | Sample browser extension",
-  "version": "0.0.1",
+  "name": "Grammar Check SLM",
+  "version": "0.1.0",
+  "description": "A simple grammar checker extension using a local SLM.",
   "permissions": [
     "activeTab",
     "scripting",
     "contextMenus",
     "storage",
-    "unlimitedStorage"
+    "unlimitedStorage",
+    "alarms"
   ],
   "background": {
     "service_worker": "background.js",
@@ -21,25 +22,23 @@
       ],
       "js": [
         "content.js"
+      ],
+      "css": [
+        "style.css"
       ]
     }
   ],
   "minimum_chrome_version": "92",
   "action": {
-    "default_icon": {
-      "16": "icons/icon.png",
-      "24": "icons/icon.png",
-      "32": "icons/icon.png"
-    },
-    "default_title": "Transformers.js",
+    "default_title": "Grammar Check SLM",
     "default_popup": "popup.html"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'"
-  },
-  "icons": {
-    "16": "icons/icon.png",
-    "48": "icons/icon.png",
-    "128": "icons/icon.png"
   }
 }

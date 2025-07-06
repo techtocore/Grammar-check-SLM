@@ -17,6 +17,7 @@ const config = {
         },
         popup: './src/popup.js',
         content: './src/content.js',
+        style: './src/style.css',
     },
     output: {
         path: path.resolve(__dirname, 'build'),
