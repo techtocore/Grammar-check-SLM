@@ -23,9 +23,11 @@ class CorrectionPipeline {
 
             // This callback will log progress to the console.
             const progress_callback = (data) => {
-                if (data.status === 'progress' && data.progress % 10 == 0) {
-                    const progress = (data.progress).toFixed(2);
-                    console.log(`BACKGROUND: Loading ${data.file} - ${progress}%`);
+                if (data.status === 'progress') {
+                    const progress = Math.round(data.progress);
+                    if (progress % 10 === 0) {
+                        console.log(`BACKGROUND: Loading ${data.file} - ${progress}%`);
+                    }
                 } else {
                     console.log("BACKGROUND:", data.status);
                 }

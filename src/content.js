@@ -1,85 +1,108 @@
 
 let isChecking = false;
 
-// A simple debounce function to prevent firing on every keystroke
+// --- Tooltip Management ---
+const tooltip = document.createElement('div');
+tooltip.id = 'grammar-tooltip';
+document.body.appendChild(tooltip);
+
+function showTooltip(event) {
+    const target = event.target;
+    if (target.classList.contains('grammar-mistake')) {
+        const suggestion = target.dataset.suggestion;
+        tooltip.textContent = suggestion;
+
+        const rect = target.getBoundingClientRect();
+
+        // --- UPDATED POSITION CALCULATION ---
+        // For absolute positioning, we need to add the scroll offset.
+        const top = rect.top + window.scrollY - tooltip.offsetHeight - 30; // 30px buffer
+        const left = rect.left + window.scrollX;
+
+        tooltip.style.display = 'block';
+        tooltip.style.top = `${top}px`;
+        tooltip.style.left = `${left}px`;
+        tooltip.style.opacity = '1';
+    }
+}
+
+function hideTooltip() {
+    tooltip.style.opacity = '0';
+    setTimeout(() => {
+        if (tooltip.style.opacity === '0') {
+            tooltip.style.display = 'none';
+        }
+    }, 200);
+}
+
+document.body.addEventListener('mouseover', showTooltip);
+document.body.addEventListener('mouseout', hideTooltip);
+
+
 function debounce(func, delay) {
     let timeout;
-    return function(...args) {
+    return (...args) => {
         clearTimeout(timeout);
         timeout = setTimeout(() => func.apply(this, args), delay);
     };
 }
 
-// --- UI Logic: Highlighting ---
 function highlightMistakes(element, mistakes) {
-    let originalHTML = element.innerHTML;
-    let newHTML = originalHTML;
+    let newHTML = element.innerHTML;
+    const highlightedOriginals = new Set();
 
     mistakes.forEach(mistake => {
-        // Use a more robust regex to avoid matching parts of words or HTML tags.
-        // It looks for the word with a word boundary (\\b) on either side.
+        if (!mistake.original || highlightedOriginals.has(mistake.original)) {
+            return;
+        }
+
         const regex = new RegExp(`\\b${mistake.original}\\b`, "gi");
-        newHTML = newHTML.replace(regex, `<span class="grammar-mistake" data-suggestion="${mistake.suggestion}">${mistake.original}</span>`);
+        newHTML = newHTML.replace(regex,
+            `<span class="grammar-mistake" data-suggestion="${mistake.suggestion}">${mistake.original}</span>`
+        );
+        highlightedOriginals.add(mistake.original);
     });
 
-    if (originalHTML !== newHTML) {
-        element.innerHTML = newHTML;
-        // Restore cursor position after update
-        const range = document.createRange();
-        const sel = window.getSelection();
-        range.selectNodeContents(element);
-        range.collapse(false);
-        sel.removeAllRanges();
-        sel.addRange(range);
-    }
+    element.innerHTML = newHTML;
+
+    // Restore cursor to the end of the contenteditable div
+    const range = document.createRange();
+    const sel = window.getSelection();
+    range.selectNodeContents(element);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
 }
 
-// --- Main Logic ---
+
 const processText = debounce((event) => {
     const element = event.target;
     const text = element.innerText;
 
-    if (isChecking || !text) {
-        return;
-    }
+    if (isChecking || !text) return;
 
     isChecking = true;
-    console.log("Sending text to background for checking:", text);
-    
-    // Show a visual indicator that checking is in progress
     element.style.borderColor = '#f0ad4e';
 
-    // Send text to the background script for AI processing
     chrome.runtime.sendMessage({ type: 'checkGrammar', text: text }, (response) => {
-        console.log("Received corrections:", response.corrections);
-        
         if (response && response.corrections && response.corrections.length > 0) {
             highlightMistakes(element, response.corrections);
         }
-        
-        // Reset visual indicator
         element.style.borderColor = '';
         isChecking = false;
     });
 
-}, 2000); // Increased delay to 2 seconds
+}, 2000);
 
-// Find all editable fields and attach our listener
 function initializeListeners() {
-    // We need to handle dynamically added elements as well
     const observer = new MutationObserver(mutations => {
         mutations.forEach(mutation => {
             mutation.addedNodes.forEach(node => {
-                if (node.nodeType === 1) { // ELEMENT_NODE
-                    const editables = node.querySelectorAll('div[contenteditable="true"]');
-                    editables.forEach(field => {
-                        console.log("Grammar checker attached to a new element.");
-                        field.addEventListener('keyup', processText);
-                    });
-                    if (node.isContentEditable) {
-                         console.log("Grammar checker attached to a new element.");
-                         node.addEventListener('keyup', processText);
-                    }
+                if (node.nodeType !== 1) return;
+                const editables = node.querySelectorAll('div[contenteditable="true"]');
+                editables.forEach(field => field.addEventListener('keyup', processText));
+                if (node.isContentEditable) {
+                    node.addEventListener('keyup', processText);
                 }
             });
         });
@@ -87,12 +110,9 @@ function initializeListeners() {
 
     observer.observe(document.body, { childList: true, subtree: true });
 
-    // Initial check for existing elements
     const initialEditables = document.querySelectorAll('div[contenteditable="true"]');
-    initialEditables.forEach(field => {
-        console.log("Grammar checker attached to an initial element.");
-        field.addEventListener('keyup', processText);
-    });
+    initialEditables.forEach(field => field.addEventListener('keyup', processText));
 }
 
 initializeListeners();
+
