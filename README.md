@@ -2,13 +2,15 @@
 
 A prototype of a privacy-focused browser extension that provides real-time grammar checking using local AI models. No data leaves your browser - everything runs locally for maximum privacy and security.
 
+![Extenstion pop-up](</assets/pop-up.png>)
+
 ## ✨ Features
 
 - **🔒 Privacy-First**: All processing happens locally in your browser - no data is sent to external servers
 - **🤖 AI-Powered**: Uses Hugging Face's Transformers.js with the FLAN-T5-Small model for intelligent grammar correction
 - **⚡ Real-Time**: Instant grammar checking as you type in editable areas
 - **🎨 Modern UI**: Beautiful, responsive popup interface with status indicators
-- **🌐 Universal**: Works on all websites with editable content areas. Please note that the prototype does not support textarea elemenents yet.
+- **🌐 Universal**: Works on all websites with editable content areas. Please note that the prototype does not support textarea elements yet.
 - **📱 Lightweight**: Optimized for performance with progress tracking during model loading
 
 ## 🛠️ Technical Stack
@@ -53,17 +55,12 @@ A prototype of a privacy-focused browser extension that provides real-time gramm
 
 5. **Start using the extension:**
    - The extension icon will appear in your browser toolbar
-   - Visit any webpage with editable content
+   - Visit any webpage with editable content (class="editable-area")
    - Grammar mistakes will be highlighted automatically
    - Click on highlighted text to see suggestions
 
-## 🎯 How It Works
+![Suggested correction](</assets/suggestion.png>)
 
-1. **Content Detection**: The extension automatically detects editable areas on web pages
-2. **Text Analysis**: When you type, the text is analyzed by the local AI model
-3. **Error Highlighting**: Grammar mistakes are highlighted with red underlines
-4. **Suggestions**: Click on highlighted text to see correction suggestions
-5. **Privacy**: All processing happens locally - no data leaves your browser
 
 ## 📁 Project Structure
 
@@ -94,10 +91,7 @@ npm run dev
 This starts Webpack in watch mode for automatic rebuilds during development.
 
 ### Testing
-Use the included `test.html` file to test the extension:
-```bash
-# Open test.html in your browser after loading the extension
-```
+Use the included [`test.html`](/test.html) file in your browser after loading the extension
 
 ### Model Configuration
 The extension currently uses `Xenova/flan-t5-small` model. You can modify the model in `src/background.js`:
@@ -112,36 +106,21 @@ static model = 'Xenova/flan-t5-small'; // Change this to use a different model
 - `Xenova/t5-small` - Alternative option
 - Any compatible Hugging Face model that supports text-to-text generation
 
-### Browser Compatibility
-- ✅ Chrome (recommended)
-- ✅ Microsoft Edge
-- ✅ Brave
-- ✅ Any Chromium-based browser
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
-- [Hugging Face](https://huggingface.co/) for Transformers.js
+- [Hugging Face](https://huggingface.co/) for Transformers.js and a [sample extension](https://github.com/huggingface/transformers.js/tree/main/examples/extension)
 - [Google T5 Team](https://ai.googleblog.com/2020/02/exploring-transfer-learning-with-t5.html) for the T5 model architecture
-- The open-source community for inspiration and tools
+- AI coding tools including GitHub Copilot, Gemini, and Claude.
 
-## 📞 Support
+
+## 📞 Support & 🤝 Contributions
 
 If you encounter any issues or have questions:
-- Open an issue on [GitHub](https://github.com/techtocore/Grammar-check-SLM/issues)
 - Check the browser console for error messages
 - Ensure you have a stable internet connection for initial model download
+
+Feel free to open an issue on [GitHub](https://github.com/techtocore/Grammar-check-SLM/issues) or submit a pull request with you feature additons.
 
 ---
 

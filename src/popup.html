@@ -20,20 +20,20 @@
             <h1>Grammar Check SLM</h1>
         </div>
 
-        <div class="status-section">
-            <div class="status-indicator active"></div>
-            <p class="status-text">Active on this page</p>
+        <div class="status-section" id="status-section">
+            <div class="status-indicator" id="status-indicator"></div>
+            <p class="status-text" id="status-text">Checking page...</p>
         </div>
 
         <div class="info-section">
             <div class="info-item">
                 <span class="info-icon">📝</span>
-                <p>Only text within editable areas (<code>class = editable-area</code>) will be checked</p>
+                <p>Only text within editable areas (<code>class = "editable-area"</code>) will be checked</p>
             </div>
             <div class="info-item">
                 <span class="info-icon">🤖</span>
-                <p>Powered by <a href="https://huggingface.co/Xenova/flan-t5-small" target="_blank">local AI model </a>
-                    through Transformers.js</p>
+                <p>Powered by a <a href="https://huggingface.co/Xenova/flan-t5-small" target="_blank">local AI model</a>
+                    & operated using Transformers.js</p>
             </div>
         </div>
 
@@ -44,6 +44,8 @@
             </a>
         </div>
     </div>
+
+    <script src="popup.js"></script>
 </body>
 
 </html>

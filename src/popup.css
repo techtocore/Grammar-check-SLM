@@ -51,17 +51,45 @@ h1 {
     gap: 10px;
     margin-bottom: 20px;
     padding: 12px;
-    background: rgba(72, 187, 120, 0.1);
     border-radius: 10px;
+    transition: all 0.3s ease;
+}
+
+.status-section.active {
+    background: rgba(72, 187, 120, 0.1);
     border-left: 4px solid #48bb78;
+}
+
+.status-section.warning {
+    background: rgba(237, 137, 54, 0.1);
+    border-left: 4px solid #ed8936;
+}
+
+.status-section.checking {
+    background: rgba(102, 126, 234, 0.1);
+    border-left: 4px solid #667eea;
 }
 
 .status-indicator {
     width: 8px;
     height: 8px;
     border-radius: 50%;
+    transition: all 0.3s ease;
+}
+
+.status-indicator.active {
     background: #48bb78;
     animation: pulse 2s infinite;
+}
+
+.status-indicator.warning {
+    background: #ed8936;
+    animation: warning-pulse 1.5s infinite;
+}
+
+.status-indicator.checking {
+    background: #667eea;
+    animation: checking-spin 1s linear infinite;
 }
 
 @keyframes pulse {
@@ -78,11 +106,50 @@ h1 {
     }
 }
 
+@keyframes warning-pulse {
+    0% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.7;
+        transform: scale(1.1);
+    }
+
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes checking-spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
 .status-text {
     margin: 0;
     font-size: 14px;
     font-weight: 500;
+    transition: color 0.3s ease;
+}
+
+.status-text.active {
     color: #2d5016;
+}
+
+.status-text.warning {
+    color: #744210;
+}
+
+.status-text.checking {
+    color: #2d3748;
 }
 
 .info-section {

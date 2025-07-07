@@ -16,8 +16,8 @@ function showTooltip(event) {
 
         // --- UPDATED POSITION CALCULATION ---
         // For absolute positioning, we need to add the scroll offset.
-        const top = rect.top + window.scrollY - tooltip.offsetHeight - 30; // 30px buffer
-        const left = rect.left + window.scrollX;
+        const top = rect.top + window.scrollY - tooltip.offsetHeight - 32; // 32px buffer
+        const left = rect.left + window.scrollX - 4; // 4px buffer
 
         tooltip.style.display = 'block';
         tooltip.style.top = `${top}px`;
