@@ -1,4 +1,3 @@
-
 let isChecking = false;
 
 // --- Tooltip Management ---
@@ -35,9 +34,49 @@ function hideTooltip() {
     }, 200);
 }
 
+// --- Click Handler for Replacing Text ---
+function handleGrammarClick(event) {
+    const target = event.target;
+    if (target.classList.contains('grammar-mistake')) {
+        event.preventDefault();
+        event.stopPropagation();
+        
+        const suggestion = target.dataset.suggestion;
+        const originalText = target.textContent;
+        
+        // Find the contenteditable parent
+        const editableParent = target.closest('[contenteditable="true"]');
+        if (!editableParent) return;
+        
+        // Save the current selection
+        const selection = window.getSelection();
+        const range = document.createRange();
+        
+        // Create a text node with the suggestion
+        const suggestionNode = document.createTextNode(suggestion);
+        
+        // Replace the span with the suggestion text
+        range.selectNode(target);
+        range.deleteContents();
+        range.insertNode(suggestionNode);
+        
+        // Position cursor after the replaced text
+        range.setStartAfter(suggestionNode);
+        range.setEndAfter(suggestionNode);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        
+        // Focus the editable element to maintain cursor position
+        editableParent.focus();
+        
+        // Hide tooltip after replacement
+        hideTooltip();
+    }
+}
+
 document.body.addEventListener('mouseover', showTooltip);
 document.body.addEventListener('mouseout', hideTooltip);
-
+document.body.addEventListener('click', handleGrammarClick);
 
 function debounce(func, delay) {
     let timeout;
