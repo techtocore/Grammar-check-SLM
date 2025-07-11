@@ -70,6 +70,11 @@ h1 {
     border-left: 4px solid #667eea;
 }
 
+.status-section.loading {
+    background: rgba(59, 130, 246, 0.1);
+    border-left: 4px solid #3b82f6;
+}
+
 .status-indicator {
     width: 8px;
     height: 8px;
@@ -90,6 +95,11 @@ h1 {
 .status-indicator.checking {
     background: #667eea;
     animation: checking-spin 1s linear infinite;
+}
+
+.status-indicator.loading {
+    background: #3b82f6;
+    animation: loading-bounce 1s ease-in-out infinite;
 }
 
 @keyframes pulse {
@@ -133,6 +143,27 @@ h1 {
     }
 }
 
+@keyframes loading-bounce {
+    0%,
+    20%,
+    50%,
+    80%,
+    100% {
+        transform: translateY(0);
+        opacity: 0.7;
+    }
+
+    40% {
+        transform: translateY(-3px);
+        opacity: 1;
+    }
+
+    60% {
+        transform: translateY(-1px);
+        opacity: 0.9;
+    }
+}
+
 .status-text {
     margin: 0;
     font-size: 14px;
@@ -150,6 +181,11 @@ h1 {
 
 .status-text.checking {
     color: #2d3748;
+}
+
+.status-text.loading {
+    color: #1e40af;
+    font-weight: 600;
 }
 
 .info-section {

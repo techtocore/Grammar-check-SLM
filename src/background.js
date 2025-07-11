@@ -16,10 +16,13 @@ class CorrectionPipeline {
     static task = 'text2text-generation';
     static model = 'Xenova/flan-t5-base';
     static instance = null;
+    static isLoading = false;
+    static isReady = false;
 
     static async getInstance() {
-        if (this.instance === null) {
+        if (this.instance === null && !this.isLoading) {
             console.log("BACKGROUND: Pipeline instance is null. Creating a new one");
+            this.isLoading = true;
 
             // This callback will log progress to the console.
             const progress_callback = (data) => {
@@ -34,13 +37,30 @@ class CorrectionPipeline {
             };
 
             this.instance = await pipeline(this.task, this.model, { progress_callback });
+            this.isLoading = false;
+            this.isReady = true;
             console.log("BACKGROUND: New pipeline instance created successfully.");
         }
         return this.instance;
     }
+
+    static getStatus() {
+        if (this.isReady) {
+            return 'ready';
+        } else if (this.isLoading) {
+            return 'loading';
+        } else {
+            return 'not-loaded';
+        }
+    }
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'getModelStatus') {
+        sendResponse({ status: CorrectionPipeline.getStatus() });
+        return true;
+    }
+
     if (message.type === 'checkGrammar') {
         (async () => {
             try {
@@ -96,5 +116,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
-const corrector = await CorrectionPipeline.getInstance(); // Preload the corrector instance
-console.log("BACKGROUND: Preloaded correction pipeline instance.");
+// Preload the corrector instance
+(async () => {
+    try {
+        const corrector = await CorrectionPipeline.getInstance();
+        console.log("BACKGROUND: Preloaded correction pipeline instance.");
+    } catch (error) {
+        console.error("BACKGROUND: Failed to preload correction pipeline:", error);
+    }
+})();

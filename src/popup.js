@@ -16,23 +16,76 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        // Inject a script to check for editable areas
-        const results = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            function: checkForEditableAreas
-        });
+        // Check the model status first
+        const modelStatusResponse = await chrome.runtime.sendMessage({ type: 'getModelStatus' });
+        const modelStatus = modelStatusResponse.status;
 
-        const hasEditableAreas = results[0].result;
-        
-        if (hasEditableAreas) {
-            updateStatus('active', 'Active on this page');
-        } else {
-            updateStatus('warning', 'No supported text fields found');
+        if (modelStatus === 'loading') {
+            updateStatus('loading', 'Loading AI model...');
+            
+            // Poll for model status until it's ready
+            const pollInterval = setInterval(async () => {
+                try {
+                    const statusResponse = await chrome.runtime.sendMessage({ type: 'getModelStatus' });
+                    if (statusResponse.status === 'ready') {
+                        clearInterval(pollInterval);
+                        checkPageCompatibility(tab);
+                    }
+                } catch (error) {
+                    console.error('Error polling model status:', error);
+                    clearInterval(pollInterval);
+                    updateStatus('warning', 'Model loading failed');
+                }
+            }, 1000);
+            
+            return;
+        } else if (modelStatus === 'not-loaded') {
+            updateStatus('loading', 'Initializing AI model...');
+            
+            // Wait a bit and check again, as the model might be starting to load
+            setTimeout(async () => {
+                try {
+                    const statusResponse = await chrome.runtime.sendMessage({ type: 'getModelStatus' });
+                    if (statusResponse.status === 'ready') {
+                        checkPageCompatibility(tab);
+                    } else {
+                        updateStatus('warning', 'Model initialization failed');
+                    }
+                } catch (error) {
+                    console.error('Error checking model status:', error);
+                    updateStatus('warning', 'Model initialization failed');
+                }
+            }, 2000);
+            
+            return;
+        } else if (modelStatus === 'ready') {
+            checkPageCompatibility(tab);
         }
 
     } catch (error) {
         console.error('Error checking page status:', error);
         updateStatus('warning', 'Unable to check this page');
+    }
+
+    async function checkPageCompatibility(tab) {
+        try {
+            // Inject a script to check for editable areas
+            const results = await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                function: checkForEditableAreas
+            });
+
+            const hasEditableAreas = results[0].result;
+            
+            if (hasEditableAreas) {
+                updateStatus('active', 'Active on this page');
+            } else {
+                updateStatus('warning', 'No supported text fields found');
+            }
+        } catch (error) {
+            console.error('Error checking editable areas:', error);
+            updateStatus('warning', 'Unable to check this page');
+        }
     }
 
     function updateStatus(type, message) {
