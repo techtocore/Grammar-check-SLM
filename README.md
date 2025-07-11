@@ -7,7 +7,7 @@ A prototype of a privacy-focused browser extension that provides real-time gramm
 ## ✨ Features
 
 - **🔒 Privacy-First**: All processing happens locally in your browser - no data is sent to external servers
-- **🤖 AI-Powered**: Uses Hugging Face's Transformers.js with the FLAN-T5-Small model for intelligent grammar correction
+- **🤖 AI-Powered**: Uses Hugging Face's Transformers.js with the FLAN-T5-Base model for intelligent grammar correction
 - **⚡ Real-Time**: Instant grammar checking as you type in editable areas
 - **🎨 Modern UI**: Beautiful, responsive popup interface with status indicators
 - **🌐 Universal**: Works on all websites with editable content areas. Please note that the prototype does not support textarea elements yet.
@@ -17,7 +17,7 @@ A prototype of a privacy-focused browser extension that provides real-time gramm
 
 - **Frontend**: HTML5, CSS3, JavaScript (ES6+)
 - **Build Tool**: Webpack 5 with CSS loaders
-- **AI Model**: Hugging Face Transformers.js (FLAN-T5-Small)
+- **AI Model**: Hugging Face Transformers.js (FLAN-T5-Base)
 - **Extension API**: Chrome Extension Manifest V3
 - **Architecture**: Service Worker background script + Content scripts
 
@@ -94,15 +94,15 @@ This starts Webpack in watch mode for automatic rebuilds during development.
 Use the included [`test.html`](/test.html) file in your browser after loading the extension
 
 ### Model Configuration
-The extension currently uses `Xenova/flan-t5-small` model. You can modify the model in `src/background.js`:
+The extension currently uses `Xenova/FLAN-T5-Base` model. You can modify the model in `src/background.js`:
 ```javascript
-static model = 'Xenova/flan-t5-small'; // Change this to use a different model
+static model = 'Xenova/FLAN-T5-Base'; // Change this to use a different model
 ```
 
 ## 🔧 Configuration
 
 ### Supported Models
-- `Xenova/flan-t5-small` (default) - Fast, lightweight
+- `Xenova/FLAN-T5-Base` (default) - Fast, lightweight
 - `Xenova/t5-small` - Alternative option
 - Any compatible Hugging Face model that supports text-to-text generation
 

@@ -12,9 +12,9 @@ chrome.alarms.get(KEEP_ALIVE_ALARM, (alarm) => {
 // -------------------------
 
 class CorrectionPipeline {
-    // Switched to a smaller, faster model optimized for this task.
+    // Using T5-base for better grammar correction quality while maintaining compatibility
     static task = 'text2text-generation';
-    static model = 'Xenova/flan-t5-small';
+    static model = 'Xenova/flan-t5-base';
     static instance = null;
 
     static async getInstance() {
@@ -50,7 +50,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 const prompt = `Correct this to standard English: "${message.text}"`;
                 console.log("BACKGROUND: Constructed prompt:", prompt);
 
-                const result = await corrector(prompt, { max_new_tokens: 100 });
+                const result = await corrector(prompt, { max_new_tokens: Math.min(150, message.text.length + 50) });
                 let correctedText = result[0].generated_text.trim();
                 correctedText = correctedText.slice(1, -1); // Remove leading/trailing quotes
                 console.log("BACKGROUND: Raw model output:", `"${correctedText}"`);
@@ -95,3 +95,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
 });
+
+const corrector = await CorrectionPipeline.getInstance(); // Preload the corrector instance
+console.log("BACKGROUND: Preloaded correction pipeline instance.");
