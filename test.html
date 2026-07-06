@@ -1,79 +1,121 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-
-<head>
-    <meta charset="UTF-8">
-    <title>Grammar Check Test</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grammar Check SLM — Demo</title>
     <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+        background: #f5f6fa;
+        color: #1f2937;
+        margin: 0;
+        padding: 40px 16px;
+        line-height: 1.5;
+      }
+      .container {
+        max-width: 720px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 24px;
+      }
+      .card {
+        background: #fff;
+        border-radius: 14px;
+        padding: 20px;
+        margin-bottom: 22px;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .editable,
+      textarea,
+      input[type='text'] {
+        width: 100%;
+        min-height: 120px;
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        padding: 12px 14px;
+        font-size: 16px;
+        font-family: inherit;
+        background: #fff;
+        color: inherit;
+        box-sizing: border-box;
+        outline: none;
+      }
+      input[type='text'] {
+        min-height: 0;
+      }
+      .editable:focus,
+      textarea:focus,
+      input:focus {
+        border-color: #6366f1;
+      }
+      .hint {
+        color: #6b7280;
+        font-size: 14px;
+        margin-top: 8px;
+      }
+      code {
+        background: rgba(99, 102, 241, 0.12);
+        padding: 1px 6px;
+        border-radius: 4px;
+      }
+      @media (prefers-color-scheme: dark) {
         body {
-            background: #f7f9fb;
-            font-family: 'Segoe UI', Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            margin: 0;
+          background: #14161c;
+          color: #e5e7eb;
         }
-
-        .container {
-            background: #fff;
-            padding: 2rem 2.5rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.07);
-            max-width: 600px;
-            width: 100%;
-            text-align: center;
+        .card {
+          background: #1f2430;
+          box-shadow: none;
         }
-
-        h1 {
-            font-size: 1.5rem;
-            color: #333;
-            margin-bottom: 1rem;
-            font-weight: 600;
+        .editable,
+        textarea,
+        input[type='text'] {
+          background: #14161c;
+          color: #e5e7eb;
+          border-color: rgba(255, 255, 255, 0.15);
         }
-
-        .editable-area {
-            width: 80%;
-            min-height: 140px;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            padding: 1rem;
-            font-size: 1rem;
-            resize: vertical;
-            background: #f9fafb;
-            transition: border 0.2s;
-            outline: none;
-            margin: 0 auto;
-            text-align: left;
-            display: block;
-        }
-
-        .editable-area:focus {
-            border-color: #2563eb;
-            background: #fff;
-        }
-
-        .hint {
-            color: #6b7280;
-            font-size: 0.95rem;
-            margin-top: 0.75rem;
-        }
+      }
     </style>
-</head>
-
-<body>
+  </head>
+  <body>
     <div class="container">
-        <h1>Grammar Check Test Box</h1>
-        <div class="hint">
-            Type in the box below to test the extension. The check will trigger 1 second after you stop typing.
-        </div>
-        <br>
-        <div class="editable-area" id="grammar-check-input" placeholder="Type or paste your text here..."
-            contenteditable="true"></div>
-        <div class="hint">Hover over a highlighted mistake to see the suggested correction.</div>
-    </div>
-</body>
+      <h1>Grammar Check SLM — Demo</h1>
+      <p class="hint">
+        Load the built extension, then type or edit the fields below. Corrections appear as wavy
+        underlines shortly after you stop typing. Hover a correction to see the suggestion, then
+        <strong>Replace</strong> or <strong>Dismiss</strong> it.
+      </p>
 
+      <div class="card">
+        <label for="rich">Rich text (<code>contenteditable</code>)</label>
+        <div class="editable" id="rich" contenteditable="true">
+          she dont like when the weather are cold, and me and him was planing to went their
+          yesterday.
+        </div>
+        <p class="hint">Great for testing Gmail-style editors.</p>
+      </div>
+
+      <div class="card">
+        <label for="area">Textarea</label>
+        <textarea id="area">
+Their going too the beach later, but its to far and we wasnt sure if its worth it.</textarea>
+        <p class="hint">Highlights are drawn with a positioned overlay mirror.</p>
+      </div>
+
+      <div class="card">
+        <label for="line">Single-line input</label>
+        <input type="text" id="line" value="i has recieved you're message yesteday" />
+      </div>
+    </div>
+  </body>
 </html>

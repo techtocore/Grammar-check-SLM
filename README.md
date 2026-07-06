@@ -1,126 +1,125 @@
 # Grammar Check SLM 🔍✍️
 
-A prototype of a privacy-focused browser extension that provides real-time grammar checking using local AI models. No data leaves your browser - everything runs locally for maximum privacy and security.
+A privacy-first browser extension that checks grammar **entirely on your device** using a local
+Small Language Model (SLM). No text ever leaves your browser — inference runs locally with
+[Transformers.js](https://github.com/huggingface/transformers.js), accelerated by **WebGPU** where
+available and falling back to WASM everywhere else.
 
-![Extenstion pop-up](</assets/pop-up.png>)
+![Extension pop-up](/assets/pop-up.png)
 
 ## ✨ Features
 
-- **🔒 Privacy-First**: All processing happens locally in your browser - no data is sent to external servers
-- **🤖 AI-Powered**: Uses Hugging Face's Transformers.js with the FLAN-T5-Base model for intelligent grammar correction
-- **⚡ Real-Time**: Instant grammar checking as you type in editable areas
-- **🎨 Modern UI**: Beautiful, responsive popup interface with status indicators
-- **🌐 Universal**: Works on all websites with editable content areas. Please note that the prototype does not support textarea elements yet.
-- **📱 Lightweight**: Optimized for performance with progress tracking during model loading
+- **🔒 Truly private** — all processing happens locally; nothing is sent to any server.
+- **🤖 State-of-the-art SLM** — defaults to Alibaba's **Qwen3** (0.6B / 1.7B / 4B) instruction
+  models, auto-selected for your hardware. FLAN-T5 is available as a lightweight fallback.
+- **⚡ WebGPU accelerated** — runs the model in an MV3 **offscreen document** so it can use the GPU,
+  with an automatic WASM fallback.
+- **🎯 Accurate mapping** — a real word-level **LCS diff** maps each fix to an exact text range, so
+  suggestions are precise (no more guessing which word changed).
+- **🧠 Sentence-aware** — uses `Intl.Segmenter` to check sentence-by-sentence and **caches** results,
+  so unchanged text is never re-processed.
+- **✒️ Works in real fields** — `contenteditable` editors **and** `<textarea>` / `<input>` fields.
+- **🎨 Non-destructive highlights** — uses the modern **CSS Custom Highlight API** for rich-text
+  fields (no DOM rewriting, no caret jumps) and a positioned overlay for inputs.
+- **🛠️ Configurable** — pick a model, acceleration backend, typing delay, per-site rules, and more.
 
-## 🛠️ Technical Stack
+## 🏗️ Architecture
 
-- **Frontend**: HTML5, CSS3, JavaScript (ES6+)
-- **Build Tool**: Webpack 5 with CSS loaders
-- **AI Model**: Hugging Face Transformers.js (FLAN-T5-Base)
-- **Extension API**: Chrome Extension Manifest V3
-- **Architecture**: Service Worker background script + Content scripts
+```
+┌──────────────┐   check/warmup/status   ┌────────────────────┐   config/check   ┌───────────────────┐
+│ Content      │ ──────────────────────▶ │ Service worker     │ ───────────────▶ │ Offscreen document│
+│ script       │ ◀────── corrections ─── │ (router+lifecycle) │ ◀── corrections ─│ (Transformers.js) │
+│  · adapters  │                         │  · settings        │                  │  · WebGPU / WASM  │
+│  · highlighter                         │  · offscreen mgmt  │                  │  · Qwen3 SLM      │
+│  · tooltip   │        settings         │  · context menu    │                  │  · diff + cache   │
+└──────────────┘ ◀────────────────────── └────────────────────┘                  └───────────────────┘
+```
 
-## 🚀 Getting Started
+- **`src/core`** — pure, fully unit-tested logic: tokenizer, LCS word diff, sentence segmentation,
+  LRU cache, prompt building/cleanup, and correction assembly.
+- **`src/offscreen`** — hosts the SLM (device selection, generation, caching).
+- **`src/background`** — message router, offscreen lifecycle, settings, context menu.
+- **`src/content`** — field discovery, adapters (contenteditable / input), highlighter, tooltip.
+- **`src/popup` / `src/options`** — UI.
+- **`src/shared`** — typed message protocol, settings storage, model catalogue, logger.
+
+## 🚀 Getting started
 
 ### Prerequisites
-- Node.js (v14 or higher)
-- npm or yarn
-- Chrome/Chromium-based browser
 
-### Installation
+- Node.js 20+
+- A Chromium-based browser, version **116+** (for the offscreen + `getContexts` APIs). WebGPU
+  (Chrome 113+) is used automatically when available.
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/techtocore/Grammar-check-SLM.git
-   cd Grammar-check-SLM
-   ```
+### Build
 
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Build the extension:**
-   ```bash
-   npm run build
-   ```
-
-4. **Load the extension in Chrome:**
-   - Open `chrome://extensions/`
-   - Enable "Developer mode" (toggle in top right)
-   - Click "Load unpacked"
-   - Select the `build` directory
-   - Click "Select Folder"
-
-5. **Start using the extension:**
-   - The extension icon will appear in your browser toolbar
-   - Visit any webpage with editable content (class="editable-area")
-   - Grammar mistakes will be highlighted automatically
-   - Click on highlighted text to see suggestions
-
-![Suggested correction](</assets/suggestion.png>)
-
-
-## 📁 Project Structure
-
+```bash
+npm install
+npm run build      # production build into ./build
+# or: npm run dev   # watch mode
 ```
-Grammar-check-SLM/
-├── src/
-│   ├── background.js      # Service worker with AI model
-│   ├── content.js         # Content script for webpage interaction
-│   ├── popup.html         # Extension popup interface
-│   ├── popup.css          # Popup styling
-│   ├── popup.js           # Popup functionality
-│   └── style.css          # Content script styles
-├── public/
-│   ├── manifest.json      # Extension manifest
-│   └── icons/             # Extension icons
-├── build/                 # Built extension files
-├── test.html             # Test page for development
-├── webpack.config.js     # Webpack configuration
-└── package.json          # Project dependencies
-```
+
+### Load in Chrome
+
+1. Open `chrome://extensions/`
+2. Enable **Developer mode**
+3. Click **Load unpacked** and select the `build` directory
+4. Open [`test.html`](/test.html) (or any site) and start typing
+
+The first check downloads the model from Hugging Face (cached afterwards for offline use).
+
+![Suggested correction](/assets/suggestion.png)
+
+## ⚙️ Configuration
+
+Open the extension's **Settings** page (or the ⚙ button in the popup) to configure:
+
+| Setting      | Description                                                             |
+| ------------ | ----------------------------------------------------------------------- |
+| Model        | `Automatic`, Qwen3 0.6B / 1.7B / 4B, or FLAN-T5 Base                    |
+| Acceleration | `Automatic` (WebGPU → WASM), WebGPU only, or WASM only                  |
+| Language     | BCP-47 locale used for sentence segmentation                            |
+| Typing delay | Debounce before a check runs                                            |
+| Fields       | Toggle rich-text and/or input/textarea checking                         |
+| Sites        | Run everywhere, only on an allow list, or everywhere except a deny list |
+
+Right-click the toolbar icon or any text field to quickly toggle checking on the current site.
+
+### Models
+
+The catalogue lives in [`src/shared/models.ts`](src/shared/models.ts). `Automatic` selects
+**Qwen3 1.7B** on WebGPU-capable devices and the faster **Qwen3 0.6B** otherwise. All models are the
+`onnx-community/*-ONNX` builds published for Transformers.js.
 
 ## 🧪 Development
 
-### Development Mode
 ```bash
-npm run dev
-```
-This starts Webpack in watch mode for automatic rebuilds during development.
-
-### Testing
-Use the included [`test.html`](/test.html) file in your browser after loading the extension
-
-### Model Configuration
-The extension currently uses `Xenova/FLAN-T5-Base` model. You can modify the model in `src/background.js`:
-```javascript
-static model = 'Xenova/FLAN-T5-Base'; // Change this to use a different model
+npm run typecheck   # tsc --noEmit
+npm run lint        # eslint (flat config)
+npm run test        # vitest (core + DOM mapping)
+npm run format      # prettier
+npm run check       # typecheck + lint + test + build
 ```
 
-## 🔧 Configuration
+The core algorithms (diff, segmentation, caching, correction assembly) and the contenteditable
+offset↔DOM mapping are covered by unit tests under `src/**/*.test.ts`.
 
-### Supported Models
-- `Xenova/FLAN-T5-Base` (default) - Fast, lightweight
-- `Xenova/t5-small` - Alternative option
-- Any compatible Hugging Face model that supports text-to-text generation
+## 🔧 Tech stack
 
+- TypeScript · Webpack 5 · Chrome Extension Manifest V3 (offscreen document)
+- Transformers.js (ONNX Runtime Web) with WebGPU + WASM
+- Qwen3 SLMs · `Intl.Segmenter` · CSS Custom Highlight API
+- Vitest · ESLint · Prettier
 
 ## 🙏 Acknowledgments
 
-- [Hugging Face](https://huggingface.co/) for Transformers.js and a [sample extension](https://github.com/huggingface/transformers.js/tree/main/examples/extension)
-- [Google T5 Team](https://ai.googleblog.com/2020/02/exploring-transfer-learning-with-t5.html) for the T5 model architecture
-- AI coding tools including GitHub Copilot, Gemini, and Claude.
+- [Hugging Face](https://huggingface.co/) for Transformers.js and the ONNX model conversions
+- [Qwen team](https://github.com/QwenLM/Qwen3) for the Qwen3 models
+- AI coding tools including GitHub Copilot
 
+## 📄 License
 
-## 📞 Support & 🤝 Contributions
-
-If you encounter any issues or have questions:
-- Check the browser console for error messages
-- Ensure you have a stable internet connection for initial model download
-
-Feel free to open an issue on [GitHub](https://github.com/techtocore/Grammar-check-SLM/issues) or submit a pull request with you feature additons.
+MIT
 
 ---
 

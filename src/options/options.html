@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grammar Check SLM — Settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="header">
+        <img class="logo" src="icons/icon48.png" alt="" />
+        <div>
+          <h1>Grammar Check SLM</h1>
+          <p class="subtitle">Private, on-device grammar checking powered by a local SLM.</p>
+        </div>
+      </header>
+
+      <section class="card">
+        <h2>General</h2>
+        <div class="field row">
+          <label for="enabled">Enable grammar checking</label>
+          <input type="checkbox" id="enabled" class="switch" />
+        </div>
+        <div class="field">
+          <label for="model">Model</label>
+          <select id="model" class="select"></select>
+          <p class="hint" id="model-desc"></p>
+        </div>
+        <div class="field">
+          <label for="device">Acceleration</label>
+          <select id="device" class="select">
+            <option value="auto">Automatic — WebGPU, fall back to CPU</option>
+            <option value="webgpu">WebGPU only (fastest)</option>
+            <option value="wasm">CPU / WASM only (most compatible)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="language">Language (BCP-47)</label>
+          <input id="language" class="input" type="text" placeholder="en" />
+        </div>
+        <div class="field">
+          <label for="debounce">Typing delay: <span id="debounce-val"></span> ms</label>
+          <input id="debounce" type="range" min="300" max="2500" step="100" />
+        </div>
+        <div class="field">
+          <label for="minWords">Minimum words before checking</label>
+          <input id="minWords" class="input" type="number" min="1" max="50" />
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Fields</h2>
+        <div class="field row">
+          <label for="ce">Check rich-text editors (contenteditable)</label>
+          <input type="checkbox" id="ce" class="switch" />
+        </div>
+        <div class="field row">
+          <label for="ti">Check inputs &amp; textareas</label>
+          <input type="checkbox" id="ti" class="switch" />
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Sites</h2>
+        <div class="field">
+          <label for="siteMode">Where to run</label>
+          <select id="siteMode" class="select">
+            <option value="all">Everywhere</option>
+            <option value="allowlist">Only on allow-listed sites</option>
+            <option value="denylist">Everywhere except deny-listed sites</option>
+          </select>
+        </div>
+        <div class="field" id="allow-wrap">
+          <label for="allowlist">Allow list (one origin per line)</label>
+          <textarea
+            id="allowlist"
+            class="input"
+            rows="4"
+            placeholder="https://example.com"
+          ></textarea>
+        </div>
+        <div class="field" id="deny-wrap">
+          <label for="denylist">Deny list (one origin per line)</label>
+          <textarea
+            id="denylist"
+            class="input"
+            rows="4"
+            placeholder="https://example.com"
+          ></textarea>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <span class="saved" id="saved" hidden>✓ Saved</span>
+        <a
+          href="https://github.com/techtocore/Grammar-check-SLM"
+          target="_blank"
+          rel="noreferrer"
+          class="ghlink"
+          >View on GitHub ↗</a
+        >
+      </footer>
+    </div>
+  </body>
+</html>

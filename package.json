@@ -1,20 +1,40 @@
 {
   "name": "grammar-check-slm",
-  "version": "0.1.0",
-  "description": "A simple grammar checker extension using a local SLM.",
-  "scripts": {
-    "build": "webpack",
-    "dev": "webpack --watch"
-  },
+  "version": "1.0.0",
+  "description": "Privacy-first, on-device grammar checking browser extension powered by a local Small Language Model (Transformers.js) with WebGPU acceleration.",
   "type": "module",
   "author": "techtocore",
   "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "webpack --mode production",
+    "dev": "webpack --mode development --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run typecheck && npm run lint && npm run test && npm run build"
+  },
   "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/chrome": "^0.2.0",
+    "@types/node": "^22.13.0",
     "copy-webpack-plugin": "^13.0.0",
-    "css-loader": "^7.1.2",
-    "html-webpack-plugin": "^5.6.3",
-    "style-loader": "^4.0.0",
-    "webpack": "^5.99.9",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^10.0.0",
+    "html-webpack-plugin": "^5.6.0",
+    "jsdom": "^26.0.0",
+    "prettier": "^3.4.0",
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.24.0",
+    "vitest": "^4.0.0",
+    "webpack": "^5.97.0",
     "webpack-cli": "^6.0.1"
   },
   "dependencies": {

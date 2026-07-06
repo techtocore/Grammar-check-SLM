@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grammar Check SLM</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <img class="logo" src="icons/icon48.png" alt="" />
+        <div class="titles">
+          <h1>Grammar Check SLM</h1>
+          <p class="subtitle">Private · on-device AI</p>
+        </div>
+      </header>
+
+      <section class="card status" id="status-card">
+        <div class="status-row">
+          <span class="dot" id="dot"></span>
+          <span class="status-text" id="status-text">Checking…</span>
+        </div>
+        <div class="progress" id="progress-wrap" hidden>
+          <div class="bar" id="bar"></div>
+        </div>
+        <div class="meta" id="meta"></div>
+      </section>
+
+      <section class="card controls">
+        <label class="row">
+          <span>Enabled everywhere</span>
+          <input type="checkbox" id="toggle-enabled" class="switch" />
+        </label>
+        <label class="row">
+          <span id="site-label" class="ellipsis">This site</span>
+          <input type="checkbox" id="toggle-site" class="switch" />
+        </label>
+        <div class="row col">
+          <span class="row-label">Model</span>
+          <select id="model-select" class="select"></select>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <button class="link-btn" id="open-options" type="button">⚙ Settings</button>
+        <a
+          class="link-btn"
+          href="https://github.com/techtocore/Grammar-check-SLM"
+          target="_blank"
+          rel="noreferrer"
+          >GitHub ↗</a
+        >
+      </footer>
+    </div>
+  </body>
+</html>
