@@ -4,6 +4,7 @@ import {
   isStatusBroadcast,
   sendToOffscreen,
   type CheckResult,
+  type ModelInfo,
   type ModelStatus,
   type RunnerConfig,
 } from '../shared/messages';
@@ -15,6 +16,8 @@ import {
   setSiteEnabled,
   type Settings,
 } from '../shared/settings';
+import { MODEL_PRESETS } from '../shared/models';
+import { deleteModelCache, listCachedModels } from '../shared/model-cache';
 import { createLogger } from '../shared/logger';
 
 const log = createLogger('background');
@@ -91,6 +94,44 @@ async function reconfigureIfRunning(): Promise<void> {
   }
 }
 
+async function handleRetry(): Promise<ModelStatus> {
+  const settings = await loadSettings();
+  if (!settings.enabled) {
+    return { state: 'disabled', progress: 0, modelId: '', device: 'unknown' };
+  }
+  await ensureConfigured(settings);
+  const status = await sendToOffscreen<ModelStatus>({ type: 'reload', target: 'offscreen' });
+  lastStatus = status;
+  return status;
+}
+
+async function handleModelsList(): Promise<ModelInfo[]> {
+  const settings = await loadSettings();
+  const cached = await listCachedModels(MODEL_PRESETS.map((p) => p.modelId));
+  return MODEL_PRESETS.map((preset) => ({
+    id: preset.id,
+    modelId: preset.modelId,
+    label: preset.label,
+    description: preset.description,
+    approxDownloadMB: preset.approxDownloadMB,
+    requiresWebGPU: preset.requiresWebGPU ?? false,
+    cached: cached[preset.modelId] ?? false,
+    active: settings.model === preset.id,
+  }));
+}
+
+async function handleModelsDownload(modelId: string): Promise<{ ok: boolean }> {
+  await ensureOffscreen();
+  // The offscreen document acknowledges immediately and reports progress via broadcasts.
+  await sendToOffscreen({ type: 'download', target: 'offscreen', modelId });
+  return { ok: true };
+}
+
+async function handleModelsDelete(modelId: string): Promise<{ ok: boolean; deleted: number }> {
+  const deleted = await deleteModelCache(modelId);
+  return { ok: true, deleted };
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (isStatusBroadcast(message)) {
     lastStatus = message.status;
@@ -114,9 +155,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
       return true;
     }
+    case 'retry': {
+      handleRetry()
+        .then(sendResponse)
+        .catch((error: unknown) => {
+          log.error('Retry failed.', error);
+          sendResponse({ state: 'error', progress: 0, modelId: '', device: 'unknown' });
+        });
+      return true;
+    }
+    case 'models:list': {
+      handleModelsList()
+        .then(sendResponse)
+        .catch(() => sendResponse([]));
+      return true;
+    }
+    case 'models:download': {
+      handleModelsDownload(message.modelId)
+        .then(sendResponse)
+        .catch((error: unknown) => {
+          log.error('Model download failed.', error);
+          sendResponse({ ok: false });
+        });
+      return true;
+    }
+    case 'models:delete': {
+      handleModelsDelete(message.modelId)
+        .then(sendResponse)
+        .catch(() => sendResponse({ ok: false, deleted: 0 }));
+      return true;
+    }
     case 'check': {
       const { text, requestId } = message;
-      handleCheck(text, sender.tab?.url, requestId)
+      // `sender.url` (the frame URL) is always available; `sender.tab.url` can be
+      // undefined without the "tabs" permission.
+      handleCheck(text, sender.url ?? sender.tab?.url, requestId)
         .then(sendResponse)
         .catch((error: unknown) => {
           sendResponse({
@@ -157,7 +230,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // ---- Context menu: quickly toggle checking on the current site ----
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   chrome.contextMenus.create(
     {
       id: CONTEXT_MENU_TOGGLE,
@@ -166,6 +239,12 @@ chrome.runtime.onInstalled.addListener(() => {
     },
     () => void chrome.runtime.lastError,
   );
+
+  // Start downloading/preparing the active model right after install/update so
+  // it is ready (and cached) before the user first types.
+  if (details.reason === 'install' || details.reason === 'update') {
+    void handleWarmup().catch((error: unknown) => log.warn('Initial model warmup failed.', error));
+  }
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {

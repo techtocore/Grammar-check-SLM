@@ -1,14 +1,9 @@
 // Tiny namespaced logger. Prefixes messages so extension contexts
-// (background / offscreen / content / popup) are easy to tell apart in devtools.
+// (background / offscreen / content / popup) are easy to tell apart. Uses a
+// plain text prefix (no %c styling) so logs render correctly in the extensions
+// error page as well as DevTools.
 
 type Level = 'debug' | 'info' | 'warn' | 'error';
-
-const STYLES: Record<Level, string> = {
-  debug: 'color:#888',
-  info: 'color:#3b82f6',
-  warn: 'color:#d97706',
-  error: 'color:#dc2626',
-};
 
 export interface Logger {
   debug(...args: unknown[]): void;
@@ -18,11 +13,11 @@ export interface Logger {
 }
 
 export function createLogger(scope: string): Logger {
+  const prefix = `[GrammarSLM:${scope}]`;
   const log =
     (level: Level) =>
     (...args: unknown[]): void => {
-      const prefix = `%c[GrammarSLM:${scope}]`;
-      console[level](prefix, STYLES[level], ...args);
+      console[level](prefix, ...args);
     };
   return { debug: log('debug'), info: log('info'), warn: log('warn'), error: log('error') };
 }

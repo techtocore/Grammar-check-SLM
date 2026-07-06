@@ -25,6 +25,8 @@ function renderStatus(status: ModelStatus | null): void {
   const progressWrap = el<HTMLDivElement>('progress-wrap');
   const bar = el<HTMLDivElement>('bar');
   const meta = el('meta');
+  const errorDetail = el<HTMLDivElement>('error-detail');
+  const retry = el<HTMLButtonElement>('retry');
 
   const state = status?.state ?? 'idle';
   dot.className = `dot ${state}`;
@@ -50,6 +52,11 @@ function renderStatus(status: ModelStatus | null): void {
   } else {
     meta.textContent = '';
   }
+
+  const isError = state === 'error';
+  retry.hidden = !isError;
+  errorDetail.hidden = !(isError && status?.error);
+  errorDetail.textContent = isError ? (status?.error ?? '') : '';
 }
 
 function renderControls(): void {
@@ -101,6 +108,12 @@ function wire(): void {
   });
   el<HTMLButtonElement>('open-options').addEventListener('click', () => {
     void chrome.runtime.openOptionsPage();
+  });
+  el<HTMLButtonElement>('retry').addEventListener('click', () => {
+    renderStatus({ state: 'loading', progress: 0, modelId: '', device: 'unknown' });
+    void sendToBackground<ModelStatus>({ type: 'retry', target: 'background' })
+      .then(renderStatus)
+      .catch(() => undefined);
   });
   chrome.runtime.onMessage.addListener((message: unknown) => {
     if (isStatusBroadcast(message)) renderStatus(message.status);

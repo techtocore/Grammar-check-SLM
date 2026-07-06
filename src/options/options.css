@@ -170,6 +170,175 @@ input[type='range'] {
   text-decoration: underline;
 }
 
+/* ---- Model manager ---- */
+
+.models-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.models-head h2 {
+  margin: 0;
+}
+
+.model-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.status-pill {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+.status-pill.ready {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+}
+
+.status-pill.error {
+  background: rgba(239, 68, 68, 0.14);
+  color: #b91c1c;
+}
+
+.models-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #eceef2;
+  border-radius: 12px;
+}
+
+.model-info {
+  min-width: 0;
+}
+
+.model-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  flex-wrap: wrap;
+}
+
+.model-desc {
+  margin-top: 3px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.badge.active {
+  background: #6366f1;
+  color: #fff;
+}
+
+.badge.cached {
+  background: rgba(16, 185, 129, 0.16);
+  color: #047857;
+}
+
+.model-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.model-btn {
+  appearance: none;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.model-btn.use,
+.model-btn.download,
+.model-btn.retry {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: #fff;
+}
+
+.model-btn.delete {
+  background: #f3f4f6;
+  color: #b91c1c;
+}
+
+.model-btn:hover {
+  filter: brightness(0.96);
+}
+
+.mini-progress {
+  width: 120px;
+  height: 6px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+
+.mini-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  transition: width 0.3s ease;
+}
+
+.model-error {
+  font-size: 11px;
+  color: #b91c1c;
+  margin-top: 4px;
+  max-width: 260px;
+  word-break: break-word;
+}
+
+@media (prefers-color-scheme: dark) {
+  .model-row {
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+  .status-pill {
+    background: rgba(99, 102, 241, 0.2);
+    color: #c7d2fe;
+  }
+  .model-btn.delete {
+    background: #374151;
+    color: #fca5a5;
+  }
+  .mini-progress {
+    background: #374151;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   body {
     color: #e5e7eb;

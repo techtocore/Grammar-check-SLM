@@ -36,14 +36,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
     }
     case 'warmup': {
-      void (async () => {
-        try {
-          await getCorrector().ensureLoaded();
-        } catch (error) {
-          log.error('Warmup failed.', error);
-        }
-        sendResponse(getCorrector().getStatus());
-      })();
+      // Fire-and-forget: start loading and report progress via status broadcasts.
+      void getCorrector()
+        .ensureLoaded()
+        .catch((error: unknown) => log.error('Warmup failed.', error));
+      sendResponse(getCorrector().getStatus());
+      return true;
+    }
+    case 'reload': {
+      void getCorrector()
+        .reload()
+        .catch((error: unknown) => log.error('Reload failed.', error));
+      sendResponse(getCorrector().getStatus());
+      return true;
+    }
+    case 'download': {
+      const { modelId } = message;
+      void getCorrector()
+        .downloadModel(modelId)
+        .catch((error: unknown) => log.error('Download failed.', error));
+      sendResponse({ ok: true });
       return true;
     }
     case 'check': {

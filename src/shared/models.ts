@@ -29,8 +29,8 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
   {
     id: 'qwen3-0.6b',
     modelId: 'onnx-community/Qwen3-0.6B-ONNX',
-    label: 'Qwen3 0.6B · Fast',
-    description: 'Newest small LLM. Excellent speed/quality balance; runs on modest hardware.',
+    label: 'Qwen3 0.6B · Recommended',
+    description: 'Newest small LLM. Fast and reliable; loads on most devices.',
     task: 'text-generation',
     approxDownloadMB: 550,
     dtype: { webgpu: 'q4f16', wasm: 'q8' },
@@ -39,11 +39,11 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
   {
     id: 'qwen3-1.7b',
     modelId: 'onnx-community/Qwen3-1.7B-ONNX',
-    label: 'Qwen3 1.7B · Balanced',
-    description: 'Stronger corrections. Recommended when WebGPU is available.',
+    label: 'Qwen3 1.7B · Higher quality',
+    description: 'Stronger corrections, but needs ~2 GB of free memory and WebGPU.',
     task: 'text-generation',
     approxDownloadMB: 1400,
-    dtype: { webgpu: 'q4f16', wasm: 'q8' },
+    dtype: { webgpu: 'q4f16', wasm: 'q4' },
     reasoning: true,
     requiresWebGPU: true,
   },
@@ -51,10 +51,10 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
     id: 'qwen3-4b',
     modelId: 'onnx-community/Qwen3-4B-ONNX',
     label: 'Qwen3 4B · Max quality',
-    description: 'Highest quality. Requires WebGPU and a capable GPU.',
+    description: 'Highest quality. Requires WebGPU and plenty of GPU memory (~4 GB).',
     task: 'text-generation',
     approxDownloadMB: 2600,
-    dtype: { webgpu: 'q4f16', wasm: 'q8' },
+    dtype: { webgpu: 'q4f16', wasm: 'q4' },
     reasoning: true,
     requiresWebGPU: true,
   },
@@ -73,10 +73,10 @@ export function getPreset(id: string): ModelPreset | undefined {
   return MODEL_PRESETS.find((preset) => preset.id === id);
 }
 
-/** Best default preset given whether WebGPU is available. */
-export function defaultPresetForDevice(hasWebGPU: boolean): ModelPreset {
-  const id = hasWebGPU ? 'qwen3-1.7b' : 'qwen3-0.6b';
-  return getPreset(id) ?? MODEL_PRESETS[0]!;
+/** Best default preset. Uses the small, reliable model that loads on the widest
+ * range of hardware; larger models are opt-in via Settings. */
+export function defaultPresetForDevice(_hasWebGPU: boolean): ModelPreset {
+  return getPreset('qwen3-0.6b') ?? MODEL_PRESETS[0]!;
 }
 
 /**

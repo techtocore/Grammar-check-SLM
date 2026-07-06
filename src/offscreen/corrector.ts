@@ -6,20 +6,29 @@ import { buildMessages, buildT5Prompt, cleanModelOutput } from '../core/prompt';
 import { LRUCache } from '../core/cache';
 import type { Correction } from '../core/types';
 import type { ModelStatus, RunnerConfig } from '../shared/messages';
-import { resolvePreset, type ModelPreset } from '../shared/models';
+import { broadcastDownload } from '../shared/messages';
+import {
+  getPreset,
+  resolvePreset,
+  MODEL_PRESETS,
+  type DType,
+  type ModelPreset,
+} from '../shared/models';
 import { createLogger } from '../shared/logger';
 
 const log = createLogger('runner');
 
 // ---- Configure Transformers.js for the extension environment (once) ----
 env.allowLocalModels = false;
+env.useBrowserCache = true;
 const onnxWasm = env.backends?.onnx?.wasm as
-  { wasmPaths?: string; numThreads?: number } | undefined;
+  { wasmPaths?: string; numThreads?: number; proxy?: boolean } | undefined;
 if (onnxWasm) {
-  // Serve the ONNX Runtime binary from the bundled copy (CSP-safe, offline-capable).
+  // Serve the ONNX Runtime binaries from the bundled copy (CSP-safe, offline-capable).
   onnxWasm.wasmPaths = chrome.runtime.getURL('ort/');
-  // Extension pages are not cross-origin isolated -> no SharedArrayBuffer/threads.
+  // Extension pages are not cross-origin isolated -> no SharedArrayBuffer/threads/worker proxy.
   onnxWasm.numThreads = 1;
+  onnxWasm.proxy = false;
 }
 
 type ChatTurn = { role: string; content: string };
@@ -51,10 +60,100 @@ async function detectWebGPU(): Promise<boolean> {
   }
 }
 
-function resolveDevice(pref: RunnerConfig['device'], hasWebGPU: boolean): 'webgpu' | 'wasm' {
-  if (pref === 'wasm') return 'wasm';
-  if (pref === 'webgpu') return hasWebGPU ? 'webgpu' : 'wasm';
-  return hasWebGPU ? 'webgpu' : 'wasm';
+/** Ordered list of backends to try for a given preference. */
+function deviceCandidates(pref: RunnerConfig['device'], hasWebGPU: boolean): ('webgpu' | 'wasm')[] {
+  if (pref === 'wasm') return ['wasm'];
+  return hasWebGPU ? ['webgpu', 'wasm'] : ['wasm'];
+}
+
+/** Ordered list of quantizations to try for a given backend (preferred first). */
+function dtypeCandidates(preset: ModelPreset, device: 'webgpu' | 'wasm'): DType[] {
+  if (preset.task === 'text2text-generation') {
+    // Small encoder-decoder models: preferred dtype plus a light fallback.
+    return [...new Set<DType>([preset.dtype[device], device === 'webgpu' ? 'fp16' : 'q8', 'q8'])];
+  }
+  // Causal LMs can be large — only try memory-frugal quantizations, ordered from
+  // lowest to higher memory. Never fall back to fp16/fp32, which would only make
+  // an out-of-memory failure worse.
+  const fallbacks: DType[] = device === 'webgpu' ? ['q4f16', 'q4', 'q8'] : ['q4', 'q8'];
+  return [...new Set<DType>([preset.dtype[device], ...fallbacks])];
+}
+
+interface RawProgress {
+  status?: string;
+  file?: string;
+  loaded?: number;
+  total?: number;
+  progress?: number;
+}
+
+/**
+ * Aggregates per-file download progress into a single, monotonic 0–99% value.
+ * A model download fetches several files (config, tokenizer, weights); reporting
+ * each file's own 0→100% makes the bar jump backwards, so we combine them by
+ * bytes and anchor the denominator to the expected total to avoid tiny early
+ * files spiking to 100%.
+ */
+class ProgressAggregator {
+  private readonly files = new Map<string, { loaded: number; total: number }>();
+  private max = 0;
+
+  constructor(private readonly expectedBytes: number) {}
+
+  update(raw: RawProgress): number {
+    const file = raw.file ?? '';
+    if (file) {
+      const prev = this.files.get(file) ?? { loaded: 0, total: 0 };
+      const loaded = typeof raw.loaded === 'number' ? raw.loaded : prev.loaded;
+      const total = typeof raw.total === 'number' && raw.total > 0 ? raw.total : prev.total;
+      if (raw.status === 'done') {
+        // A completed file counts fully towards the total.
+        const size = Math.max(total, loaded, prev.loaded, prev.total);
+        this.files.set(file, { loaded: size, total: size });
+      } else {
+        this.files.set(file, { loaded, total });
+      }
+    }
+
+    let sumLoaded = 0;
+    let sumTotal = 0;
+    for (const entry of this.files.values()) {
+      sumLoaded += entry.loaded;
+      sumTotal += Math.max(entry.total, entry.loaded);
+    }
+    const denom = Math.max(sumTotal, this.expectedBytes, 1);
+    const pct = Math.min(99, Math.round((sumLoaded / denom) * 100));
+    this.max = Math.max(this.max, pct);
+    return this.max;
+  }
+}
+
+/** Turns a raw load error into a short, user-actionable message. */
+function classifyError(error: unknown): string {
+  const text = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  if (text.includes('could not locate') || text.includes('404') || text.includes('not found')) {
+    return 'Model files could not be found. The model may be unavailable — try another model.';
+  }
+  if (
+    text.includes('memory') ||
+    text.includes('allocation') ||
+    text.includes('array buffer') ||
+    text.includes('oom') ||
+    text.includes('aborted')
+  ) {
+    return 'Not enough memory to load this model. Pick a smaller model (e.g. Qwen3 0.6B) in Settings.';
+  }
+  if (
+    text.includes('failed to fetch') ||
+    text.includes('network') ||
+    text.includes('err_internet')
+  ) {
+    return 'Network error while downloading the model. Check your connection, then retry.';
+  }
+  if (text.includes('webgpu') || text.includes('gpu') || text.includes('adapter')) {
+    return 'GPU initialization failed. Switch acceleration to CPU/WASM in Settings, then retry.';
+  }
+  return 'The model failed to load. Retry, or pick a different model in Settings.';
 }
 
 function extractText(out: GenerationOutputItem[]): string {
@@ -154,43 +253,39 @@ export class Corrector {
     if (config.device === 'webgpu' && !hasWebGPU) {
       log.warn('WebGPU requested but unavailable; falling back to WASM.');
     }
-    let device = resolveDevice(config.device, hasWebGPU);
     const preset = resolvePreset(config.model, hasWebGPU);
-    this.setStatus({ state: 'loading', progress: 0, modelId: preset.modelId, device });
+    const expectedBytes = preset.approxDownloadMB * 1024 * 1024;
+    let lastError: unknown = new Error('No backend available');
 
-    let generator: TextGenerator;
-    try {
-      generator = await this.build(preset, device, preset.dtype[device]);
-    } catch (error) {
-      if (device === 'webgpu') {
-        log.warn('WebGPU model load failed; retrying on WASM.', error);
-        device = 'wasm';
-        this.setStatus({ state: 'loading', progress: 0, device });
+    // Try each backend, and within each, each quantization, until one loads.
+    for (const device of deviceCandidates(config.device, hasWebGPU)) {
+      for (const dtype of dtypeCandidates(preset, device)) {
+        if (generation !== this.loadGeneration) return; // superseded by a config change
+        this.setStatus({ state: 'loading', progress: 0, modelId: preset.modelId, device });
+        const aggregator = new ProgressAggregator(expectedBytes);
         try {
-          generator = await this.build(preset, 'wasm', preset.dtype.wasm);
-        } catch (wasmError) {
-          if (generation === this.loadGeneration) this.failLoad(wasmError);
-          throw wasmError;
+          const generator = await this.build(preset, device, dtype, (raw) => {
+            if (raw.status === 'progress' || raw.status === 'done') {
+              this.setStatus({ state: 'loading', progress: aggregator.update(raw) });
+            }
+          });
+          if (generation !== this.loadGeneration) {
+            await generator.dispose?.();
+            return;
+          }
+          this.generator = generator;
+          this.preset = preset;
+          this.setStatus({ state: 'ready', progress: 100, device });
+          return;
+        } catch (error) {
+          lastError = error;
+          log.warn(`Load failed on ${device}/${dtype}.`, error);
         }
-      } else {
-        if (generation === this.loadGeneration) this.failLoad(error);
-        throw error;
       }
     }
 
-    // A newer configuration superseded this load while it was running.
-    if (generation !== this.loadGeneration) {
-      try {
-        await generator.dispose?.();
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
-
-    this.generator = generator;
-    this.preset = preset;
-    this.setStatus({ state: 'ready', progress: 100, device });
+    if (generation === this.loadGeneration) this.failLoad(lastError);
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
   private failLoad(error: unknown): void {
@@ -199,23 +294,71 @@ export class Corrector {
       state: 'error',
       progress: 0,
       error: error instanceof Error ? error.message : String(error),
-      message: 'Failed to load the model',
+      message: classifyError(error),
     });
   }
 
   private async build(
     preset: ModelPreset,
     device: 'webgpu' | 'wasm',
-    dtype: string,
+    dtype: DType,
+    onProgress: (raw: RawProgress) => void,
   ): Promise<TextGenerator> {
     const progress_callback = (raw: unknown): void => {
-      const data = raw as { status?: string; progress?: number };
-      if (data.status === 'progress' && typeof data.progress === 'number') {
-        this.setStatus({ state: 'loading', progress: Math.min(99, Math.round(data.progress)) });
-      }
+      onProgress(raw as RawProgress);
     };
     log.info(`Loading ${preset.modelId} on ${device} (${dtype}).`);
     return createPipeline(preset.task, preset.modelId, { device, dtype, progress_callback });
+  }
+
+  /** Disposes the current model and loads it again (used for retry after an error). */
+  async reload(): Promise<void> {
+    await this.dispose();
+    await this.ensureLoaded();
+  }
+
+  /**
+   * Downloads and caches a model's files without making it active, by loading a
+   * throwaway pipeline and disposing it. Progress is broadcast per model.
+   */
+  async downloadModel(modelId: string): Promise<void> {
+    const preset = MODEL_PRESETS.find((p) => p.modelId === modelId) ?? getPreset(modelId);
+    if (!preset) throw new Error(`Unknown model: ${modelId}`);
+    return this.runExclusive(async () => {
+      const hasWebGPU = await detectWebGPU();
+      const expectedBytes = preset.approxDownloadMB * 1024 * 1024;
+      let lastError: unknown = new Error('No backend available');
+      broadcastDownload({ modelId: preset.modelId, state: 'downloading', progress: 0 });
+      for (const device of deviceCandidates('auto', hasWebGPU)) {
+        for (const dtype of dtypeCandidates(preset, device)) {
+          const aggregator = new ProgressAggregator(expectedBytes);
+          try {
+            const generator = await this.build(preset, device, dtype, (raw) => {
+              if (raw.status === 'progress' || raw.status === 'done') {
+                broadcastDownload({
+                  modelId: preset.modelId,
+                  state: 'downloading',
+                  progress: aggregator.update(raw),
+                });
+              }
+            });
+            await generator.dispose?.();
+            broadcastDownload({ modelId: preset.modelId, state: 'done', progress: 100 });
+            return;
+          } catch (error) {
+            lastError = error;
+            log.warn(`Download failed on ${device}/${dtype}.`, error);
+          }
+        }
+      }
+      broadcastDownload({
+        modelId: preset.modelId,
+        state: 'error',
+        progress: 0,
+        error: classifyError(lastError),
+      });
+      throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    });
   }
 
   private async correctSentence(sentence: string, preset: ModelPreset): Promise<string> {

@@ -28,6 +28,7 @@ export class FieldRegistry {
     this.started = true;
     document.addEventListener('focusin', this.onFocusIn, true);
     if (document.activeElement instanceof HTMLElement) this.maybeAttach(document.activeElement);
+    this.scanExisting();
     this.observer = new MutationObserver((mutations) => this.onMutations(mutations));
     this.observer.observe(document.documentElement, {
       childList: true,
@@ -35,6 +36,22 @@ export class FieldRegistry {
       attributes: true,
       attributeFilter: ['contenteditable', 'type'],
     });
+  }
+
+  /** Attaches to editable fields already present on the page (e.g. pre-filled). */
+  private scanExisting(): void {
+    const candidates = document.querySelectorAll<HTMLElement>(
+      '[contenteditable=""],[contenteditable="true"],textarea,input',
+    );
+    let count = 0;
+    for (const element of candidates) {
+      if (count >= 40) break;
+      if (!this.kindFor(element)) continue;
+      // Skip hidden fields (but always include the focused one).
+      if (element.offsetParent === null && element !== document.activeElement) continue;
+      this.maybeAttach(element);
+      count++;
+    }
   }
 
   stop(): void {

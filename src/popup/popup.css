@@ -123,6 +123,37 @@ body {
   min-height: 14px;
 }
 
+.error-detail {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 8px;
+  padding: 6px 8px;
+  max-height: 90px;
+  overflow: auto;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.retry-btn {
+  margin-top: 10px;
+  appearance: none;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  font-family: inherit;
+}
+
+.retry-btn:hover {
+  filter: brightness(0.96);
+}
+
 .row {
   display: flex;
   align-items: center;

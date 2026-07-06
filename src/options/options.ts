@@ -1,4 +1,10 @@
-import { sendToBackground } from '../shared/messages';
+import {
+  isDownloadProgress,
+  isStatusBroadcast,
+  sendToBackground,
+  type ModelInfo,
+  type ModelStatus,
+} from '../shared/messages';
 import type { Settings } from '../shared/settings';
 import { AUTO_MODEL, getPreset, MODEL_PRESETS } from '../shared/models';
 
@@ -10,6 +16,12 @@ function el<T extends HTMLElement>(id: string): T {
 
 let settings: Settings | null = null;
 let savedTimer: number | null = null;
+let models: ModelInfo[] = [];
+let activeStatus: ModelStatus | null = null;
+const downloads = new Map<
+  string,
+  { progress: number; state: 'downloading' | 'error'; error?: string }
+>();
 
 function parseList(text: string): string[] {
   return text
@@ -35,11 +47,143 @@ async function save(patch: Partial<Settings>): Promise<void> {
   });
   flashSaved();
   render();
+  if ('model' in patch) void refreshModels();
+}
+
+// ---- Model manager ----
+
+function button(label: string, className: string, onClick: () => void): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `model-btn ${className}`;
+  btn.textContent = label;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+function renderModelStatus(): void {
+  const container = el('model-status');
+  container.replaceChildren();
+  const status = activeStatus;
+  if (!status || status.state === 'idle' || status.state === 'disabled') return;
+
+  const badge = document.createElement('span');
+  badge.className = `status-pill ${status.state}`;
+  if (status.state === 'loading') badge.textContent = `Loading… ${status.progress}%`;
+  else if (status.state === 'ready') badge.textContent = `Ready · ${status.device.toUpperCase()}`;
+  else badge.textContent = 'Load failed';
+  container.append(badge);
+
+  if (status.state === 'error') {
+    container.append(
+      button('Retry', 'retry', () => {
+        void sendToBackground<ModelStatus>({ type: 'retry', target: 'background' }).then((s) => {
+          activeStatus = s;
+          renderModelStatus();
+        });
+      }),
+    );
+    if (status.error) {
+      const detail = document.createElement('div');
+      detail.className = 'model-error';
+      detail.textContent = status.error;
+      container.append(detail);
+    }
+  }
+}
+
+function renderModels(): void {
+  const list = el('models-list');
+  list.replaceChildren();
+
+  for (const model of models) {
+    const row = document.createElement('div');
+    row.className = 'model-row';
+
+    const info = document.createElement('div');
+    info.className = 'model-info';
+    const title = document.createElement('div');
+    title.className = 'model-title';
+    title.textContent = model.label;
+    if (model.active) {
+      const activeBadge = document.createElement('span');
+      activeBadge.className = 'badge active';
+      activeBadge.textContent = 'Active';
+      title.append(activeBadge);
+    }
+    if (model.cached) {
+      const cachedBadge = document.createElement('span');
+      cachedBadge.className = 'badge cached';
+      cachedBadge.textContent = 'Downloaded';
+      title.append(cachedBadge);
+    }
+    const desc = document.createElement('div');
+    desc.className = 'model-desc';
+    desc.textContent = `${model.description} · ~${model.approxDownloadMB} MB${
+      model.requiresWebGPU ? ' · WebGPU recommended' : ''
+    }`;
+    info.append(title, desc);
+
+    const actions = document.createElement('div');
+    actions.className = 'model-actions';
+    const dl = downloads.get(model.modelId);
+
+    if (dl?.state === 'downloading') {
+      const wrap = document.createElement('div');
+      wrap.className = 'mini-progress';
+      const bar = document.createElement('div');
+      bar.className = 'mini-bar';
+      bar.style.width = `${dl.progress}%`;
+      wrap.append(bar);
+      actions.append(wrap);
+    } else {
+      if (!model.active) {
+        actions.append(button('Use', 'use', () => void save({ model: model.id })));
+      }
+      if (model.cached) {
+        actions.append(
+          button('Delete', 'delete', () => {
+            void sendToBackground({
+              type: 'models:delete',
+              target: 'background',
+              modelId: model.modelId,
+            }).then(() => refreshModels());
+          }),
+        );
+      } else {
+        actions.append(
+          button('Download', 'download', () => {
+            downloads.set(model.modelId, { progress: 0, state: 'downloading' });
+            renderModels();
+            void sendToBackground({
+              type: 'models:download',
+              target: 'background',
+              modelId: model.modelId,
+            });
+          }),
+        );
+      }
+      if (dl?.state === 'error') {
+        const err = document.createElement('div');
+        err.className = 'model-error';
+        err.textContent = dl.error ?? 'Download failed';
+        actions.append(err);
+      }
+    }
+
+    row.append(info, actions);
+    list.append(row);
+  }
+}
+
+async function refreshModels(): Promise<void> {
+  models = await sendToBackground<ModelInfo[]>({ type: 'models:list', target: 'background' });
+  renderModels();
 }
 
 function modelDescription(id: string): string {
   if (id === AUTO_MODEL) {
-    return 'Picks Qwen3 1.7B on WebGPU-capable devices, or the faster Qwen3 0.6B otherwise.';
+    return 'Uses the recommended Qwen3 0.6B model — fast and reliable on most devices.';
   }
   const preset = getPreset(id);
   if (!preset) return '';
@@ -122,10 +266,42 @@ function wire(): void {
   );
 }
 
+function wireBroadcasts(): void {
+  chrome.runtime.onMessage.addListener((message: unknown) => {
+    if (isStatusBroadcast(message)) {
+      activeStatus = message.status;
+      renderModelStatus();
+    } else if (isDownloadProgress(message)) {
+      if (message.state === 'downloading') {
+        downloads.set(message.modelId, { progress: message.progress, state: 'downloading' });
+        renderModels();
+      } else if (message.state === 'error') {
+        downloads.set(message.modelId, {
+          progress: 0,
+          state: 'error',
+          error: message.error ?? 'Download failed',
+        });
+        renderModels();
+      } else {
+        // done
+        downloads.delete(message.modelId);
+        void refreshModels();
+      }
+    }
+  });
+}
+
 async function init(): Promise<void> {
   settings = await sendToBackground<Settings>({ type: 'settings:get', target: 'background' });
   render();
   wire();
+  wireBroadcasts();
+  await refreshModels();
+  activeStatus = await sendToBackground<ModelStatus | null>({
+    type: 'status',
+    target: 'background',
+  });
+  renderModelStatus();
 }
 
 void init();

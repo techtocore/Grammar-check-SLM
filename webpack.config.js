@@ -42,10 +42,10 @@ export default (_env, argv) => {
           exclude: /node_modules/,
         },
         {
-          // ONNX Runtime references this binary via import.meta.url, which makes
-          // webpack emit a second 20 MB copy. We serve our own copy from /ort
-          // (see CopyPlugin + env.backends.onnx.wasm.wasmPaths), so skip emitting it.
-          test: /ort-wasm-simd-threaded\.jsep\.wasm$/,
+          // ONNX Runtime references its binaries via import.meta.url, which makes
+          // webpack emit duplicate copies. We serve our own copies from /ort
+          // (see CopyPlugin + env.backends.onnx.wasm.wasmPaths), so skip emitting.
+          test: /ort-wasm.*\.wasm$/,
           type: 'asset/resource',
           generator: { emit: false },
         },
@@ -85,15 +85,23 @@ export default (_env, argv) => {
           { from: 'src/popup/popup.css', to: 'popup.css' },
           { from: 'src/options/options.css', to: 'options.css' },
           { from: 'src/content/content.css', to: 'content.css' },
-          // Bundle the ONNX Runtime WebGPU/WASM binary locally so inference works
+          // Bundle the ONNX Runtime WebGPU/WASM binaries locally so inference works
           // under the extension CSP and offline after first model download.
           {
-            from: 'node_modules/@huggingface/transformers/dist/ort-wasm-simd-threaded.jsep.wasm',
+            from: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm',
             to: 'ort/ort-wasm-simd-threaded.jsep.wasm',
           },
           {
-            from: 'node_modules/@huggingface/transformers/dist/ort-wasm-simd-threaded.jsep.mjs',
+            from: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.mjs',
             to: 'ort/ort-wasm-simd-threaded.jsep.mjs',
+          },
+          {
+            from: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm',
+            to: 'ort/ort-wasm-simd-threaded.wasm',
+          },
+          {
+            from: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs',
+            to: 'ort/ort-wasm-simd-threaded.mjs',
           },
         ],
       }),

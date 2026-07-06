@@ -2,7 +2,10 @@ import type { Correction } from '../core/types';
 import type { FieldAdapter } from './fields/types';
 import type { Settings } from '../shared/settings';
 import { newRequestId, sendToBackground, type CheckResult } from '../shared/messages';
+import { createLogger } from '../shared/logger';
 import type { Tooltip } from './tooltip';
+
+const log = createLogger('content');
 
 function wordCount(text: string): number {
   return text.trim().match(/\S+/g)?.length ?? 0;
@@ -77,7 +80,8 @@ export class FieldController {
         requestId: newRequestId(),
         text,
       });
-    } catch {
+    } catch (error) {
+      log.warn('Grammar check request failed.', error);
       return;
     }
 
@@ -85,7 +89,9 @@ export class FieldController {
     // Discard if the field changed while we were waiting.
     if (this.adapter.getText() !== result.sourceText) return;
 
+    if (result.error) log.warn('Grammar check returned an error:', result.error);
     const filtered = result.corrections.filter((c) => !this.ignored.has(ignoreKey(c)));
+    log.debug(`Checked ${text.length} chars → ${filtered.length} suggestion(s).`);
     this.setCorrections(filtered);
   }
 

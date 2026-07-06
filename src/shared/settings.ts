@@ -78,9 +78,12 @@ export function onSettingsChanged(callback: (settings: Settings) => void): () =>
 export function originOf(url: string | undefined): string | null {
   if (!url) return null;
   try {
-    const { protocol, origin } = new URL(url);
-    if (protocol !== 'http:' && protocol !== 'https:') return null;
-    return origin;
+    const parsed = new URL(url);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.origin;
+    // Local files share a single opaque origin; treat them as one site so the
+    // extension works on file:// test pages (requires "Allow access to file URLs").
+    if (parsed.protocol === 'file:') return 'file://';
+    return null;
   } catch {
     return null;
   }

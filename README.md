@@ -10,8 +10,9 @@ available and falling back to WASM everywhere else.
 ## ✨ Features
 
 - **🔒 Truly private** — all processing happens locally; nothing is sent to any server.
-- **🤖 State-of-the-art SLM** — defaults to Alibaba's **Qwen3** (0.6B / 1.7B / 4B) instruction
-  models, auto-selected for your hardware. FLAN-T5 is available as a lightweight fallback.
+- **🤖 State-of-the-art SLM** — defaults to Alibaba's **Qwen3 0.6B** instruction model (fast and
+  reliable on most devices); **Qwen3 1.7B / 4B** are opt-in for higher quality. FLAN-T5 is available
+  as a lightweight fallback.
 - **⚡ WebGPU accelerated** — runs the model in an MV3 **offscreen document** so it can use the GPU,
   with an automatic WASM fallback.
 - **🎯 Accurate mapping** — a real word-level **LCS diff** maps each fix to an exact text range, so
@@ -64,9 +65,15 @@ npm run build      # production build into ./build
 1. Open `chrome://extensions/`
 2. Enable **Developer mode**
 3. Click **Load unpacked** and select the `build` directory
-4. Open [`test.html`](/test.html) (or any site) and start typing
+4. Try it on any website, or open the included [`test.html`](/test.html)
 
-The first check downloads the model from Hugging Face (cached afterwards for offline use).
+> **Testing with `test.html` (a local file):** Chrome does **not** run extensions on `file://`
+> pages by default. Either enable **“Allow access to file URLs”** on the extension's details page,
+> or serve the file over HTTP (e.g. `npx serve .` then open `http://localhost:3000/test.html`).
+
+The first check downloads the model from Hugging Face (cached afterwards for offline use). Pre-filled
+fields are checked automatically; you'll see wavy underlines a moment after the model is ready. Open
+the page's DevTools console to see `[GrammarSLM:content]` logs if you want to confirm checks are running.
 
 ![Suggested correction](/assets/suggestion.png)
 
@@ -87,9 +94,10 @@ Right-click the toolbar icon or any text field to quickly toggle checking on the
 
 ### Models
 
-The catalogue lives in [`src/shared/models.ts`](src/shared/models.ts). `Automatic` selects
-**Qwen3 1.7B** on WebGPU-capable devices and the faster **Qwen3 0.6B** otherwise. All models are the
-`onnx-community/*-ONNX` builds published for Transformers.js.
+The catalogue lives in [`src/shared/models.ts`](src/shared/models.ts). `Automatic` uses the
+recommended **Qwen3 0.6B** — it loads reliably on the widest range of hardware. Larger models
+(**Qwen3 1.7B / 4B**) are opt-in and need significantly more memory (WebGPU recommended). All models
+are the `onnx-community/*-ONNX` builds published for Transformers.js.
 
 ## 🧪 Development
 
