@@ -308,7 +308,84 @@ function renderControls(): void {
   }
   modelSelect.value = settings.model;
 
-  el<HTMLSelectElement>('backend-select').value = settings.backend;
+  renderEngine();
+}
+
+// ---- Engine picker ----
+
+type AiAvailability = LanguageModelAvailability | 'unsupported';
+let aiAvailability: AiAvailability | null = null;
+
+const BACKEND_DESC: Record<Settings['backend'], string> = {
+  auto: "Uses Chrome's built-in AI when available, otherwise a local model.",
+  prompt: "Uses Chrome's built-in Gemini Nano — instant and private, no download.",
+  transformers: 'Runs a local model you download — works in any browser.',
+};
+
+function engineDescription(backend: Settings['backend']): string {
+  if (backend === 'prompt') {
+    if (aiAvailability === 'unavailable' || aiAvailability === 'unsupported') {
+      return "Chrome built-in AI isn't available here. Pick Automatic or Local instead.";
+    }
+    if (aiAvailability === 'downloadable' || aiAvailability === 'downloading') {
+      return 'Chrome built-in Gemini Nano — tap the badge above to set it up once.';
+    }
+  }
+  return BACKEND_DESC[backend];
+}
+
+function renderEngineBadge(backend: Settings['backend']): void {
+  const badge = el<HTMLButtonElement>('engine-badge');
+  // Only relevant when Chrome AI can actually be used.
+  if (backend === 'transformers' || aiAvailability === null) {
+    badge.hidden = true;
+    return;
+  }
+  const map: Record<AiAvailability, { text: string; cls: string }> = {
+    available: { text: '⚡ Chrome AI ready', cls: 'ok' },
+    downloadable: { text: 'Set up Chrome AI →', cls: 'warn' },
+    downloading: { text: 'Downloading Chrome AI…', cls: 'warn' },
+    unavailable: { text: 'Chrome AI unavailable', cls: 'muted' },
+    unsupported: { text: 'Chrome AI unavailable', cls: 'muted' },
+  };
+  const { text, cls } = map[aiAvailability];
+  badge.textContent = text;
+  badge.className = `engine-badge ${cls}`;
+  badge.hidden = false;
+}
+
+function renderEngine(): void {
+  if (!settings) return;
+  const backend = settings.backend;
+
+  document.querySelectorAll<HTMLButtonElement>('.seg').forEach((seg) => {
+    const active = seg.dataset.backend === backend;
+    seg.classList.toggle('active', active);
+    seg.setAttribute('aria-checked', String(active));
+  });
+
+  el('engine-desc').textContent = engineDescription(backend);
+
+  // Local model is only used by the local/auto engines — hide it for Chrome AI
+  // so the model picker never appears when checks run through Chrome's API.
+  el('engine-model').hidden = backend === 'prompt';
+  el('model-label').textContent = backend === 'auto' ? 'Fallback model' : 'Local model';
+
+  renderEngineBadge(backend);
+}
+
+async function loadAiAvailability(): Promise<void> {
+  const lm = globalThis.LanguageModel;
+  if (!lm) {
+    aiAvailability = 'unsupported';
+  } else {
+    try {
+      aiAvailability = await lm.availability();
+    } catch {
+      aiAvailability = 'unsupported';
+    }
+  }
+  renderEngine();
 }
 
 async function updateSettings(patch: Partial<Settings>): Promise<void> {
@@ -331,8 +408,17 @@ function wireControls(): void {
   el<HTMLSelectElement>('model-select').addEventListener('change', (e) => {
     void updateSettings({ model: (e.target as HTMLSelectElement).value });
   });
-  el<HTMLSelectElement>('backend-select').addEventListener('change', (e) => {
-    void updateSettings({ backend: (e.target as HTMLSelectElement).value as Settings['backend'] });
+  document.querySelectorAll<HTMLButtonElement>('.seg').forEach((seg) => {
+    seg.addEventListener('click', () => {
+      const backend = seg.dataset.backend as Settings['backend'] | undefined;
+      if (backend && backend !== settings?.backend) void updateSettings({ backend });
+    });
+  });
+  el<HTMLButtonElement>('engine-badge').addEventListener('click', () => {
+    // The badge only acts as a shortcut to set up Chrome AI in Settings.
+    if (aiAvailability === 'downloadable' || aiAvailability === 'downloading') {
+      void chrome.runtime.openOptionsPage();
+    }
   });
   const openOptions = (): void => void chrome.runtime.openOptionsPage();
   el<HTMLButtonElement>('open-options').addEventListener('click', openOptions);
@@ -356,6 +442,7 @@ async function init(): Promise<void> {
   wireTabs();
   wireEditor();
   wireControls();
+  void loadAiAvailability();
 
   chrome.runtime.onMessage.addListener((message: unknown) => {
     if (isStatusBroadcast(message)) renderStatus(message.status);

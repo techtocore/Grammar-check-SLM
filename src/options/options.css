@@ -95,6 +95,22 @@ body {
   font-size: 14px;
   font-family: inherit;
   color: inherit;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.input:focus,
+.select:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+/* Chrome built-in AI setup card gets a gentle accent so it reads as special. */
+#ai-card {
+  border: 1px solid rgba(99, 102, 241, 0.22);
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.05), #fff 64%);
 }
 
 textarea.input {
@@ -357,5 +373,9 @@ input[type='range'] {
     background: #14161c;
     color: #e5e7eb;
     border-color: rgba(255, 255, 255, 0.12);
+  }
+  #ai-card {
+    border-color: rgba(99, 102, 241, 0.35);
+    background: linear-gradient(180deg, rgba(99, 102, 241, 0.12), #1f2430 64%);
   }
 }

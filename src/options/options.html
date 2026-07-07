@@ -23,26 +23,27 @@
           <input type="checkbox" id="enabled" class="switch" />
         </div>
         <div class="field">
-          <label for="backend">Engine</label>
+          <label for="backend">AI engine</label>
           <select id="backend" class="select">
-            <option value="auto">Automatic — Chrome built-in AI when available, else local</option>
-            <option value="prompt">Chrome built-in AI only (Gemini Nano)</option>
-            <option value="transformers">Local model only (Transformers.js)</option>
+            <option value="auto">✨ Automatic — best available (recommended)</option>
+            <option value="prompt">⚡ Chrome built-in AI — Gemini Nano</option>
+            <option value="transformers">💻 Local model — Transformers.js</option>
           </select>
           <p class="hint" id="backend-desc"></p>
         </div>
-        <div class="field">
-          <label for="model">Local model</label>
+        <div class="field" id="model-field">
+          <label for="model" id="model-label">Local model</label>
           <select id="model" class="select"></select>
           <p class="hint" id="model-desc"></p>
         </div>
-        <div class="field">
+        <div class="field" id="device-field">
           <label for="device">Acceleration</label>
           <select id="device" class="select">
             <option value="auto">Automatic — WebGPU, fall back to CPU</option>
             <option value="webgpu">WebGPU only (fastest)</option>
             <option value="wasm">CPU / WASM only (most compatible)</option>
           </select>
+          <p class="hint">Applies to local models only.</p>
         </div>
         <div class="field">
           <label for="language">Language (BCP-47)</label>

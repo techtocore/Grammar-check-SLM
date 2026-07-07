@@ -269,12 +269,12 @@ function modelDescription(id: string): string {
 
 function backendDescription(backend: Settings['backend']): string {
   if (backend === 'prompt') {
-    return "Uses Chrome's built-in Gemini Nano — fast and efficient, no model download (requires a supported Chrome build).";
+    return "Uses Chrome's built-in Gemini Nano — instant and private, with no model download. Requires a supported Chrome build (set it up below).";
   }
   if (backend === 'transformers') {
-    return 'Always uses a local Transformers.js model (works in any browser).';
+    return 'Always runs a local Transformers.js model you download — works in any browser.';
   }
-  return "Prefers Chrome's built-in AI when available, otherwise falls back to the local model below.";
+  return "Prefers Chrome's built-in AI when available, and falls back to the local model below otherwise.";
 }
 
 function render(): void {
@@ -297,6 +297,13 @@ function render(): void {
   }
   modelSelect.value = settings.model;
   el('model-desc').textContent = modelDescription(settings.model);
+
+  // Local model + acceleration only matter when a local model can run. Hide
+  // them for the Chrome-AI-only engine so nothing implies a local model is used.
+  const localUsed = settings.backend !== 'prompt';
+  el('model-field').hidden = !localUsed;
+  el('device-field').hidden = !localUsed;
+  el('model-label').textContent = settings.backend === 'auto' ? 'Fallback model' : 'Local model';
 
   el<HTMLSelectElement>('siteMode').value = settings.siteMode;
   el<HTMLTextAreaElement>('allowlist').value = settings.allowlist.join('\n');

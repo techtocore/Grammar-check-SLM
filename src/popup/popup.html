@@ -90,17 +90,28 @@
             <span id="site-label" class="ellipsis">This site</span>
             <input type="checkbox" id="toggle-site" class="switch" />
           </label>
-          <div class="row col">
-            <span class="row-label">Engine</span>
-            <select id="backend-select" class="select">
-              <option value="auto">Automatic — Chrome AI when available</option>
-              <option value="prompt">Chrome built-in AI (Gemini Nano)</option>
-              <option value="transformers">Local model</option>
-            </select>
-          </div>
-          <div class="row col">
-            <span class="row-label">Local model</span>
-            <select id="model-select" class="select"></select>
+
+          <div class="engine">
+            <div class="engine-head">
+              <span class="row-label">AI engine</span>
+              <button class="engine-badge" id="engine-badge" type="button" hidden></button>
+            </div>
+            <div class="segmented" id="engine-seg" role="radiogroup" aria-label="AI engine">
+              <button class="seg" data-backend="auto" type="button" role="radio">
+                <span class="seg-emoji" aria-hidden="true">✨</span>Automatic
+              </button>
+              <button class="seg" data-backend="prompt" type="button" role="radio">
+                <span class="seg-emoji" aria-hidden="true">⚡</span>Chrome&nbsp;AI
+              </button>
+              <button class="seg" data-backend="transformers" type="button" role="radio">
+                <span class="seg-emoji" aria-hidden="true">💻</span>Local
+              </button>
+            </div>
+            <p class="engine-desc" id="engine-desc"></p>
+            <div class="engine-model" id="engine-model" hidden>
+              <label class="row-label" id="model-label" for="model-select">Local model</label>
+              <select id="model-select" class="select"></select>
+            </div>
           </div>
         </div>
 

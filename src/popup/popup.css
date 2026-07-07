@@ -413,6 +413,125 @@ body {
   color: inherit;
 }
 
+/* ---------- Engine picker ---------- */
+
+.engine {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f1f4;
+}
+
+.engine-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.engine-badge {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #4338ca;
+  transition: filter 0.15s ease;
+}
+
+.engine-badge:hover {
+  filter: brightness(0.97);
+}
+
+.engine-badge.ok {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+  cursor: default;
+}
+
+.engine-badge.warn {
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+}
+
+.engine-badge.muted {
+  background: #eef0f4;
+  color: #6b7280;
+  cursor: default;
+}
+
+.segmented {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: #eceef3;
+  border-radius: 11px;
+}
+
+.seg {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 7px 4px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.seg:hover {
+  color: #4338ca;
+}
+
+.seg.active {
+  background: #fff;
+  color: #4338ca;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.seg-emoji {
+  font-size: 13px;
+}
+
+.seg:focus-visible,
+.engine-badge:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 1px;
+}
+
+.engine-desc {
+  margin: 0;
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.45;
+}
+
+.engine-model {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+  animation: fade-in 0.18s ease;
+}
+
 .switch {
   appearance: none;
   position: relative;
@@ -519,6 +638,35 @@ body {
   }
   .select {
     color: #e5e7eb;
+  }
+  .segmented {
+    background: #1f2430;
+  }
+  .seg {
+    color: #9ca3af;
+  }
+  .seg:hover {
+    color: #c7d2fe;
+  }
+  .seg.active {
+    background: #2a3040;
+    color: #c7d2fe;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  }
+  .engine {
+    border-top-color: rgba(255, 255, 255, 0.06);
+  }
+  .engine-badge {
+    background: rgba(99, 102, 241, 0.22);
+    color: #c7d2fe;
+  }
+  .engine-badge.ok {
+    background: rgba(16, 185, 129, 0.22);
+    color: #34d399;
+  }
+  .engine-badge.muted {
+    background: rgba(255, 255, 255, 0.08);
+    color: #9ca3af;
   }
   .progress {
     background: #374151;
