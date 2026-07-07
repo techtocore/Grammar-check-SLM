@@ -11,49 +11,102 @@
       <header class="header">
         <img class="logo" src="icons/icon48.png" alt="" />
         <div class="titles">
-          <h1>Grammar Check SLM</h1>
-          <p class="subtitle">Private · on-device AI</p>
+          <h1>Grammar Check</h1>
+          <p class="subtitle" id="header-status">Private · on-device AI</p>
         </div>
+        <button
+          class="icon-btn"
+          id="open-options"
+          type="button"
+          title="Settings"
+          aria-label="Settings"
+        >
+          ⚙
+        </button>
       </header>
 
-      <section class="card status" id="status-card">
-        <div class="status-row">
-          <span class="dot" id="dot"></span>
-          <span class="status-text" id="status-text">Checking…</span>
+      <nav class="tabs" role="tablist">
+        <button class="tab active" id="tab-editor" data-tab="editor" type="button" role="tab">
+          Editor
+        </button>
+        <button class="tab" id="tab-controls" data-tab="controls" type="button" role="tab">
+          Controls
+        </button>
+      </nav>
+
+      <!-- ===== Editor ===== -->
+      <section class="panel" id="panel-editor" role="tabpanel">
+        <div class="editor">
+          <textarea
+            id="editor-input"
+            class="editor-input"
+            placeholder="Type or paste a sentence or paragraph to correct…"
+            spellcheck="false"
+            autocomplete="off"
+          ></textarea>
+
+          <div class="editor-bar">
+            <span class="editor-hint" id="editor-hint"></span>
+            <div class="editor-buttons">
+              <button class="btn ghost" id="editor-clear" type="button">Clear</button>
+              <button class="btn primary" id="editor-correct" type="button">Correct</button>
+            </div>
+          </div>
+
+          <div class="result" id="editor-result" hidden>
+            <div class="result-head">
+              <span class="result-count" id="result-count"></span>
+              <div class="result-actions">
+                <button class="btn ghost small" id="editor-use" type="button" hidden>Use ↑</button>
+                <button class="btn primary small" id="editor-copy" type="button">Copy</button>
+              </div>
+            </div>
+            <div class="result-body" id="result-body"></div>
+          </div>
         </div>
-        <div class="progress" id="progress-wrap" hidden>
-          <div class="bar" id="bar"></div>
-        </div>
-        <div class="meta" id="meta"></div>
-        <div class="error-detail" id="error-detail" hidden></div>
-        <button class="retry-btn" id="retry" type="button" hidden>Retry</button>
       </section>
 
-      <section class="card controls">
-        <label class="row">
-          <span>Enabled everywhere</span>
-          <input type="checkbox" id="toggle-enabled" class="switch" />
-        </label>
-        <label class="row">
-          <span id="site-label" class="ellipsis">This site</span>
-          <input type="checkbox" id="toggle-site" class="switch" />
-        </label>
-        <div class="row col">
-          <span class="row-label">Model</span>
-          <select id="model-select" class="select"></select>
+      <!-- ===== Controls ===== -->
+      <section class="panel" id="panel-controls" role="tabpanel" hidden>
+        <div class="card status" id="status-card">
+          <div class="status-row">
+            <span class="dot" id="dot"></span>
+            <span class="status-text" id="status-text">Checking…</span>
+          </div>
+          <div class="progress" id="progress-wrap" hidden>
+            <div class="bar" id="bar"></div>
+          </div>
+          <div class="meta" id="meta"></div>
+          <div class="error-detail" id="error-detail" hidden></div>
+          <button class="retry-btn" id="retry" type="button" hidden>Retry</button>
         </div>
-      </section>
 
-      <footer class="footer">
-        <button class="link-btn" id="open-options" type="button">⚙ Settings</button>
-        <a
-          class="link-btn"
-          href="https://github.com/techtocore/Grammar-check-SLM"
-          target="_blank"
-          rel="noreferrer"
-          >GitHub ↗</a
-        >
-      </footer>
+        <div class="card controls">
+          <label class="row">
+            <span>Enabled everywhere</span>
+            <input type="checkbox" id="toggle-enabled" class="switch" />
+          </label>
+          <label class="row">
+            <span id="site-label" class="ellipsis">This site</span>
+            <input type="checkbox" id="toggle-site" class="switch" />
+          </label>
+          <div class="row col">
+            <span class="row-label">Model</span>
+            <select id="model-select" class="select"></select>
+          </div>
+        </div>
+
+        <footer class="footer">
+          <button class="link-btn" id="open-options-2" type="button">⚙ All settings</button>
+          <a
+            class="link-btn"
+            href="https://github.com/techtocore/Grammar-check-SLM"
+            target="_blank"
+            rel="noreferrer"
+            >GitHub ↗</a
+          >
+        </footer>
+      </section>
     </div>
   </body>
 </html>

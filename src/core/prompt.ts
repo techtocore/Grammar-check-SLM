@@ -19,10 +19,20 @@ export const GRAMMAR_SYSTEM_PROMPT = [
   '- If the sentence is already correct, return it exactly as-is.',
 ].join('\n');
 
-/** Builds the chat message array for an instruction-tuned causal LM. */
+/**
+ * Builds the chat message array for an instruction-tuned causal LM. Includes a
+ * few short examples to steer small models toward returning only the corrected
+ * sentence (and leaving already-correct text untouched).
+ */
 export function buildMessages(sentence: string): ChatMessage[] {
   return [
     { role: 'system', content: GRAMMAR_SYSTEM_PROMPT },
+    { role: 'user', content: 'she dont has any freinds' },
+    { role: 'assistant', content: "She doesn't have any friends." },
+    { role: 'user', content: 'the meetings is schedule for tommorow' },
+    { role: 'assistant', content: 'The meetings are scheduled for tomorrow.' },
+    { role: 'user', content: 'This sentence is already correct.' },
+    { role: 'assistant', content: 'This sentence is already correct.' },
     { role: 'user', content: sentence },
   ];
 }
@@ -69,13 +79,23 @@ function stripThinking(input: string): string {
   return out;
 }
 
+/** First non-empty line that still has content after stripping a label prefix. */
+function firstMeaningfulLine(text: string): string {
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    const stripped = line.replace(PREFIX_RE, '').trim();
+    if (stripped) return stripped;
+  }
+  return text.trim();
+}
+
 /**
  * Normalizes raw model output into a clean corrected sentence. Strips reasoning
- * traces, echoed instruction prefixes, and wrapping quotes. Falls back to the
- * source sentence when the model returns nothing usable.
+ * traces, echoed instruction prefixes, verbose trailing explanations, and
+ * wrapping quotes. Falls back to the source sentence when nothing usable remains.
  */
 export function cleanModelOutput(raw: string, source: string): string {
-  let out = stripThinking(raw).trim();
+  let out = firstMeaningfulLine(stripThinking(raw));
   out = out.replace(PREFIX_RE, '');
   out = stripWrappingQuotes(out);
   out = out.replace(/\s+/g, ' ').trim();

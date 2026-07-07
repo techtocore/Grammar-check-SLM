@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Private, on-device grammar checking powered by a local Small Language Model (Qwen3) with WebGPU acceleration.",
   "minimum_chrome_version": "116",
-  "permissions": ["storage", "unlimitedStorage", "offscreen", "contextMenus", "activeTab"],
+  "permissions": ["storage", "unlimitedStorage", "offscreen", "contextMenus", "activeTab", "clipboardWrite"],
   "background": {
     "service_worker": "background.js",
     "type": "module"

@@ -51,6 +51,7 @@ export type BackgroundMessage =
   | { type: 'warmup'; target: 'background' }
   | { type: 'retry'; target: 'background' }
   | { type: 'check'; target: 'background'; requestId: string; text: string }
+  | { type: 'correct'; target: 'background'; requestId: string; text: string }
   | { type: 'settings:get'; target: 'background' }
   | { type: 'settings:set'; target: 'background'; patch: Partial<Settings> }
   | { type: 'site:enabled'; target: 'background'; origin: string }
@@ -67,6 +68,18 @@ export type OffscreenMessage =
   | { type: 'check'; target: 'offscreen'; requestId: string; text: string }
   | { type: 'config'; target: 'offscreen'; config: RunnerConfig }
   | { type: 'download'; target: 'offscreen'; modelId: string };
+
+// ---- Messages addressed to a page's content script (via chrome.tabs.sendMessage) ----
+
+export type ContentMessage =
+  | { type: 'gc-correcting'; target: 'content' }
+  | {
+      type: 'gc-correct-result';
+      target: 'content';
+      corrected: string;
+      original: string;
+      error?: string;
+    };
 
 // ---- Broadcasts (no response expected) ----
 
@@ -105,6 +118,10 @@ export function isDownloadProgress(msg: unknown): msg is DownloadProgress {
     msg !== null &&
     (msg as { type?: string }).type === 'download:progress'
   );
+}
+
+export function isContentMessage(msg: unknown): msg is ContentMessage {
+  return typeof msg === 'object' && msg !== null && 'target' in msg && msg.target === 'content';
 }
 
 /** Sends a typed message to the background worker and awaits its response. */

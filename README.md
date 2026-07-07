@@ -20,6 +20,10 @@ available and falling back to WASM everywhere else.
 - **🧠 Sentence-aware** — uses `Intl.Segmenter` to check sentence-by-sentence and **caches** results,
   so unchanged text is never re-processed.
 - **✒️ Works in real fields** — `contenteditable` editors **and** `<textarea>` / `<input>` fields.
+- **✍️ Built-in Editor** — paste a sentence or paragraph into the popup for instant, on-device
+  correction with a clean diff view and one-click **copy**.
+- **🖱️ Right-click to correct** — select any text on a page and choose **“Correct grammar of …”** to
+  fix it in place (editable fields) or copy the corrected version (read-only text).
 - **🎨 Non-destructive highlights** — uses the modern **CSS Custom Highlight API** for rich-text
   fields (no DOM rewriting, no caret jumps) and a positioned overlay for inputs.
 - **🛠️ Configurable** — pick a model, acceleration backend, typing delay, per-site rules, and more.
@@ -91,6 +95,8 @@ Open the extension's **Settings** page (or the ⚙ button in the popup) to confi
 | Sites        | Run everywhere, only on an allow list, or everywhere except a deny list |
 
 Right-click the toolbar icon or any text field to quickly toggle checking on the current site.
+Select text anywhere and right-click **“Correct grammar of …”** to correct it in place (or copy the
+result for read-only text).
 
 ### Models
 

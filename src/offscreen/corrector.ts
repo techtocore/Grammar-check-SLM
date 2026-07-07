@@ -1,10 +1,10 @@
 import { pipeline, env } from '@huggingface/transformers';
 
-import { segmentSentences } from '../core/segment';
+import { segmentSentences, splitLongSentence } from '../core/segment';
 import { assembleCorrections } from '../core/corrections';
 import { buildMessages, buildT5Prompt, cleanModelOutput } from '../core/prompt';
 import { LRUCache } from '../core/cache';
-import type { Correction } from '../core/types';
+import type { Correction, Sentence } from '../core/types';
 import type { ModelStatus, RunnerConfig } from '../shared/messages';
 import { broadcastDownload } from '../shared/messages';
 import {
@@ -17,6 +17,14 @@ import {
 import { createLogger } from '../shared/logger';
 
 const log = createLogger('runner');
+
+// Bound how much text we run per request to keep latency reasonable.
+const MAX_SENTENCE_LEN = 320;
+const MAX_SENTENCES = 60;
+
+// After a load failure, don't retry for this long (prevents a retry storm where
+// every incoming check re-runs the whole failing load and thrashes memory).
+const LOAD_RETRY_COOLDOWN_MS = 15000;
 
 // ---- Configure Transformers.js for the extension environment (once) ----
 env.allowLocalModels = false;
@@ -77,6 +85,18 @@ function dtypeCandidates(preset: ModelPreset, device: 'webgpu' | 'wasm'): DType[
   // an out-of-memory failure worse.
   const fallbacks: DType[] = device === 'webgpu' ? ['q4f16', 'q4', 'q8'] : ['q4', 'q8'];
   return [...new Set<DType>([preset.dtype[device], ...fallbacks])];
+}
+
+/** Whether an error looks like an out-of-memory / allocation failure. */
+function isMemoryError(error: unknown): boolean {
+  const text = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    text.includes('memory') ||
+    text.includes('allocation') ||
+    text.includes('array buffer') ||
+    text.includes('oom') ||
+    text.includes('aborted')
+  );
 }
 
 interface RawProgress {
@@ -178,6 +198,7 @@ export class Corrector {
   private loadPromise: Promise<void> | null = null;
   private config: RunnerConfig | null = null;
   private loadGeneration = 0;
+  private loadFailedAt = 0;
   private readonly cache = new LRUCache<string, string>(1000);
   private chain: Promise<unknown> = Promise.resolve();
   private status: ModelStatus = { state: 'idle', progress: 0, modelId: '', device: 'unknown' };
@@ -196,6 +217,7 @@ export class Corrector {
     if (changed) {
       // Invalidate any in-flight load so its result is discarded on completion.
       this.loadGeneration++;
+      this.loadFailedAt = 0;
       this.cache.clear();
       void this.dispose();
     }
@@ -218,6 +240,11 @@ export class Corrector {
 
   async ensureLoaded(): Promise<void> {
     if (this.generator) return;
+    // Fail fast during the cooldown after a failure, instead of re-running the
+    // whole (memory-thrashing) load gauntlet on every incoming request.
+    if (this.loadFailedAt > 0 && Date.now() - this.loadFailedAt < LOAD_RETRY_COOLDOWN_MS) {
+      throw new Error(this.status.message ?? 'Model failed to load');
+    }
     if (!this.loadPromise) this.loadPromise = this.load();
     await this.loadPromise;
   }
@@ -228,14 +255,24 @@ export class Corrector {
       const config = this.config;
       const preset = this.preset;
       if (!config || !preset) return [];
-      const sentences = segmentSentences(text, config.language)
-        .filter((s) => s.text.length <= 400)
-        .slice(0, 40);
+
+      // Split any over-long/unpunctuated segments so nothing is silently skipped.
+      const sentences: Sentence[] = [];
+      for (const sentence of segmentSentences(text, config.language)) {
+        for (const chunk of splitLongSentence(sentence, MAX_SENTENCE_LEN)) {
+          sentences.push(chunk);
+          if (sentences.length >= MAX_SENTENCES) break;
+        }
+        if (sentences.length >= MAX_SENTENCES) break;
+      }
+
       const corrected: string[] = [];
       for (const sentence of sentences) {
         corrected.push(await this.correctSentence(sentence.text, preset));
       }
-      return assembleCorrections(text, sentences, corrected);
+      const corrections = assembleCorrections(text, sentences, corrected);
+      log.debug(`Corrected ${sentences.length} segment(s) → ${corrections.length} suggestion(s).`);
+      return corrections;
     });
   }
 
@@ -275,11 +312,15 @@ export class Corrector {
           }
           this.generator = generator;
           this.preset = preset;
+          this.loadFailedAt = 0;
           this.setStatus({ state: 'ready', progress: 100, device });
           return;
         } catch (error) {
           lastError = error;
           log.warn(`Load failed on ${device}/${dtype}.`, error);
+          // A different quantization of the SAME model won't fix an out-of-memory
+          // error (and only allocates more), so skip to the next backend.
+          if (isMemoryError(error)) break;
         }
       }
     }
@@ -290,6 +331,7 @@ export class Corrector {
 
   private failLoad(error: unknown): void {
     this.loadPromise = null;
+    this.loadFailedAt = Date.now();
     this.setStatus({
       state: 'error',
       progress: 0,
@@ -313,6 +355,9 @@ export class Corrector {
 
   /** Disposes the current model and loads it again (used for retry after an error). */
   async reload(): Promise<void> {
+    // Invalidate any in-flight load so it can't complete alongside the retry.
+    this.loadGeneration++;
+    this.loadFailedAt = 0;
     await this.dispose();
     await this.ensureLoaded();
   }

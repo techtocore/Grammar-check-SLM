@@ -1,7 +1,7 @@
 export * from './types';
 export { tokenize } from './tokenize';
 export { diffWords } from './diff';
-export { segmentSentences } from './segment';
+export { segmentSentences, splitLongSentence } from './segment';
 export { LRUCache } from './cache';
 export { escapeHtml, escapeRegExp } from './sanitize';
 export {

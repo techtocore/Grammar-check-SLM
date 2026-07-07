@@ -18,8 +18,8 @@ export interface AssembleOptions {
 }
 
 const DEFAULTS: Required<AssembleOptions> = {
-  maxWordRatio: 0.75,
-  maxLengthRatio: 2,
+  maxWordRatio: 0.85,
+  maxLengthRatio: 2.2,
   minLengthRatio: 0.4,
   minSentenceLength: 2,
 };

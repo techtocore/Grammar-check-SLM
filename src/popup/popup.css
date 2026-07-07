@@ -4,7 +4,7 @@
 
 body {
   margin: 0;
-  width: 340px;
+  width: 384px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   color: #1f2937;
   background: #f5f6fa;
@@ -14,23 +14,30 @@ body {
   padding: 14px;
 }
 
+/* ---------- Header ---------- */
+
 .header {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px;
+  padding: 13px 14px;
   margin-bottom: 12px;
   border-radius: 16px;
   background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
   color: #fff;
-  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.35);
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.32);
 }
 
 .logo {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.15);
+}
+
+.titles {
+  flex: 1;
+  min-width: 0;
 }
 
 .titles h1 {
@@ -42,8 +49,227 @@ body {
 .subtitle {
   margin: 2px 0 0;
   font-size: 12px;
-  opacity: 0.85;
+  opacity: 0.9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+
+.icon-btn {
+  appearance: none;
+  border: 0;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  font-size: 15px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+/* ---------- Tabs ---------- */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 12px;
+  background: #eceef3;
+  border-radius: 12px;
+}
+
+.tab {
+  flex: 1;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 8px 10px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6b7280;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.tab.active {
+  background: #fff;
+  color: #4338ca;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+/* ---------- Editor ---------- */
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.editor-input {
+  width: 100%;
+  min-height: 108px;
+  max-height: 220px;
+  resize: vertical;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #e2e4ea;
+  background: #fff;
+  color: inherit;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.editor-input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.editor-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.editor-hint {
+  font-size: 12px;
+  color: #6b7280;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-buttons {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn {
+  appearance: none;
+  border: 0;
+  border-radius: 9px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    filter 0.15s ease,
+    background 0.15s ease;
+}
+
+.btn.small {
+  padding: 6px 11px;
+  font-size: 12px;
+}
+
+.btn.primary {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+}
+
+.btn.primary:hover {
+  filter: brightness(1.03);
+}
+
+.btn.ghost {
+  background: #eef0f4;
+  color: #374151;
+}
+
+.btn.ghost:hover {
+  background: #e4e7ee;
+}
+
+.btn.copied {
+  background: #10b981 !important;
+  color: #fff !important;
+}
+
+/* ---------- Result ---------- */
+
+.result {
+  border: 1px solid #e9ebf0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+  animation: fade-in 0.18s ease;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid #f0f1f4;
+  background: #fafbfc;
+}
+
+.result-count {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.result-count.clean {
+  color: #047857;
+}
+
+.result-count.changed {
+  color: #4338ca;
+}
+
+.result-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.result-body {
+  padding: 12px;
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.diff-add {
+  background: rgba(16, 185, 129, 0.16);
+  color: #047857;
+  border-radius: 4px;
+  padding: 0 2px;
+  font-weight: 600;
+}
+
+/* ---------- Controls (status + toggles) ---------- */
 
 .card {
   background: #fff;
@@ -84,10 +310,6 @@ body {
 
 .dot.error {
   background: #ef4444;
-}
-
-.dot.disabled {
-  background: #9ca3af;
 }
 
 @keyframes pulse {
@@ -150,10 +372,6 @@ body {
   font-family: inherit;
 }
 
-.retry-btn:hover {
-  filter: brightness(0.96);
-}
-
 .row {
   display: flex;
   align-items: center;
@@ -192,6 +410,7 @@ body {
   background: #fff;
   font-size: 13px;
   font-family: inherit;
+  color: inherit;
 }
 
 .switch {
@@ -256,28 +475,56 @@ body {
   background: rgba(99, 102, 241, 0.1);
 }
 
+/* ---------- Dark mode ---------- */
+
 @media (prefers-color-scheme: dark) {
   body {
     color: #e5e7eb;
     background: #14161c;
   }
-  .card {
+  .tabs {
     background: #1f2430;
+  }
+  .tab {
+    color: #9ca3af;
+  }
+  .tab.active {
+    background: #2a3040;
+    color: #c7d2fe;
+  }
+  .editor-input,
+  .result,
+  .card,
+  .select {
+    background: #1f2430;
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+  .card {
     box-shadow: none;
     border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .result-head {
+    background: #232a38;
+    border-bottom-color: rgba(255, 255, 255, 0.06);
+  }
+  .btn.ghost {
+    background: #2a3040;
+    color: #e5e7eb;
+  }
+  .btn.ghost:hover {
+    background: #333b4d;
   }
   .row + .row {
     border-top-color: rgba(255, 255, 255, 0.06);
   }
   .select {
-    background: #14161c;
     color: #e5e7eb;
-    border-color: rgba(255, 255, 255, 0.12);
   }
   .progress {
     background: #374151;
   }
-  .dot {
-    background: #6b7280;
+  .diff-add {
+    background: rgba(16, 185, 129, 0.22);
+    color: #34d399;
   }
 }

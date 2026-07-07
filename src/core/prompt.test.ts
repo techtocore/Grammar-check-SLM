@@ -2,12 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { buildMessages, cleanModelOutput, GRAMMAR_SYSTEM_PROMPT } from './prompt';
 
 describe('buildMessages', () => {
-  it('builds a system + user chat pair', () => {
+  it('starts with the system prompt and ends with the sentence', () => {
     const messages = buildMessages('I has a cat');
-    expect(messages).toEqual([
-      { role: 'system', content: GRAMMAR_SYSTEM_PROMPT },
-      { role: 'user', content: 'I has a cat' },
-    ]);
+    expect(messages[0]).toEqual({ role: 'system', content: GRAMMAR_SYSTEM_PROMPT });
+    expect(messages[messages.length - 1]).toEqual({ role: 'user', content: 'I has a cat' });
+    expect(messages.length).toBeGreaterThan(2); // includes few-shot examples
   });
 });
 
@@ -54,5 +53,15 @@ describe('cleanModelOutput', () => {
 
   it('collapses excess whitespace', () => {
     expect(cleanModelOutput('He   goes    home.', 'x')).toBe('He goes home.');
+  });
+
+  it('keeps only the corrected sentence, dropping trailing explanation lines', () => {
+    expect(cleanModelOutput('He goes home.\n\nExplanation: fixed the verb.', 'x')).toBe(
+      'He goes home.',
+    );
+  });
+
+  it('handles a label line followed by the answer on the next line', () => {
+    expect(cleanModelOutput('Corrected sentence:\nHe goes home.', 'x')).toBe('He goes home.');
   });
 });
