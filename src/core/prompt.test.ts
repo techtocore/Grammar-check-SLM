@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { buildMessages, cleanModelOutput, GRAMMAR_SYSTEM_PROMPT } from './prompt';
+import {
+  buildMessages,
+  buildInitialPrompts,
+  cleanModelOutput,
+  GRAMMAR_SYSTEM_PROMPT,
+} from './prompt';
 
 describe('buildMessages', () => {
   it('starts with the system prompt and ends with the sentence', () => {
@@ -7,6 +12,16 @@ describe('buildMessages', () => {
     expect(messages[0]).toEqual({ role: 'system', content: GRAMMAR_SYSTEM_PROMPT });
     expect(messages[messages.length - 1]).toEqual({ role: 'user', content: 'I has a cat' });
     expect(messages.length).toBeGreaterThan(2); // includes few-shot examples
+  });
+});
+
+describe('buildInitialPrompts', () => {
+  it('is the system + few-shot context without a trailing sentence', () => {
+    const initial = buildInitialPrompts();
+    expect(initial[0]).toEqual({ role: 'system', content: GRAMMAR_SYSTEM_PROMPT });
+    // Every message must have content (no empty trailing user turn).
+    for (const m of initial) expect(m.content.length).toBeGreaterThan(0);
+    expect(initial[initial.length - 1]!.role).toBe('assistant');
   });
 });
 

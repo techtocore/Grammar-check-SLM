@@ -30,12 +30,23 @@ export class ContentEditableAdapter implements FieldAdapter {
     this.dom = buildDomText(this.element);
     if (this.useApi) {
       const ranges = corrections
-        .map((c) => resolveRange(this.dom, c.start, c.end))
+        .map((c) => this.displayRange(c.start, c.end))
         .filter((r): r is Range => r !== null && !r.collapsed);
       this.highlights.set(ranges);
     } else {
       this.repositionOverlay();
     }
+  }
+
+  /** A non-collapsed range for highlighting; zero-width insertions are widened
+   * to an adjacent character so missing-word suggestions are still visible. */
+  private displayRange(start: number, end: number): Range | null {
+    if (start !== end) return resolveRange(this.dom, start, end);
+    const len = this.dom.text.length;
+    return (
+      resolveRange(this.dom, start, Math.min(len, end + 1)) ??
+      resolveRange(this.dom, Math.max(0, start - 1), start)
+    );
   }
 
   clear(): void {

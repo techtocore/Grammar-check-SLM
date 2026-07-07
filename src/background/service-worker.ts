@@ -29,30 +29,28 @@ const CONTEXT_MENU_TOGGLE = 'gcslm-toggle-site';
 const CONTEXT_MENU_CORRECT = 'gcslm-correct-selection';
 
 let lastStatus: ModelStatus | null = null;
-let currentConfigKey = '';
 let currentModelKey = '';
 
 function runnerConfig(settings: Settings): RunnerConfig {
-  return { model: settings.model, device: settings.device, language: settings.language };
+  return {
+    backend: settings.backend,
+    model: settings.model,
+    device: settings.device,
+    language: settings.language,
+  };
 }
 
-/** Ensures the offscreen runner exists and has the current configuration. */
+/**
+ * Ensures the offscreen runner exists and is configured. Config is always
+ * (re)sent — `setConfig` is a no-op on the offscreen when nothing changed — so a
+ * freshly (re)created offscreen document can never end up without a config
+ * (which would make loading fail with "not configured" and leave status idle).
+ */
 async function ensureConfigured(settings: Settings): Promise<void> {
-  const existedBefore = await offscreenExists();
   await ensureOffscreen();
-  // A freshly created offscreen document has no config yet, even if the service
-  // worker still believes it delivered one earlier.
-  if (!existedBefore) {
-    currentConfigKey = '';
-    currentModelKey = '';
-  }
   const config = runnerConfig(settings);
-  const key = JSON.stringify(config);
-  if (key !== currentConfigKey) {
-    await sendToOffscreen({ type: 'config', target: 'offscreen', config });
-    currentConfigKey = key;
-    currentModelKey = `${config.model}|${config.device}`;
-  }
+  await sendToOffscreen({ type: 'config', target: 'offscreen', config });
+  currentModelKey = `${config.backend}|${config.model}|${config.device}`;
 }
 
 async function handleCheck(
@@ -109,10 +107,9 @@ async function handleStatus(): Promise<ModelStatus> {
 async function reconfigureIfRunning(): Promise<void> {
   const settings = await loadSettings();
   const config = runnerConfig(settings);
-  const newModelKey = `${config.model}|${config.device}`;
+  const newModelKey = `${config.backend}|${config.model}|${config.device}`;
 
   if (!(await offscreenExists())) {
-    currentConfigKey = '';
     currentModelKey = '';
     return;
   }
@@ -123,7 +120,6 @@ async function reconfigureIfRunning(): Promise<void> {
     // reclaimed, then recreate it fresh. Reusing the document leaks memory across
     // switches and eventually prevents any model from loading.
     await chrome.offscreen.closeDocument().catch(() => undefined);
-    currentConfigKey = '';
     currentModelKey = '';
     if (settings.enabled) {
       await ensureConfigured(settings);
@@ -131,7 +127,6 @@ async function reconfigureIfRunning(): Promise<void> {
     }
   } else {
     // Same model/backend (or unknown): update configuration in place.
-    currentConfigKey = '';
     await ensureConfigured(settings);
   }
 }
@@ -150,6 +145,7 @@ async function handleRetry(): Promise<ModelStatus> {
 async function handleModelsList(): Promise<ModelInfo[]> {
   const settings = await loadSettings();
   const cached = await listCachedModels(MODEL_PRESETS.map((p) => p.modelId));
+  const localActive = settings.backend !== 'prompt';
   return MODEL_PRESETS.map((preset) => ({
     id: preset.id,
     modelId: preset.modelId,
@@ -158,7 +154,7 @@ async function handleModelsList(): Promise<ModelInfo[]> {
     approxDownloadMB: preset.approxDownloadMB,
     requiresWebGPU: preset.requiresWebGPU ?? false,
     cached: cached[preset.modelId] ?? false,
-    active: settings.model === preset.id,
+    active: localActive && settings.model === preset.id,
   }));
 }
 
@@ -267,6 +263,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       saveSettings(message.patch)
         .then(async (settings) => {
           await reconfigureIfRunning();
+          if (settings.enabled) {
+            // Proactively (re)load the model so it becomes ready without the
+            // user having to open the popup — covers enabling the extension
+            // when no offscreen document exists yet.
+            void handleWarmup().catch((error: unknown) =>
+              log.warn('Warmup after settings change failed.', error),
+            );
+          }
           sendResponse(settings);
         })
         .catch(() => sendResponse(null));
@@ -342,8 +346,10 @@ async function correctSelection(tabId: number, text: string): Promise<void> {
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === CONTEXT_MENU_CORRECT) {
-    const text = info.selectionText?.trim();
-    if (tab?.id !== undefined && text) void correctSelection(tab.id, text);
+    // Keep the raw selection (don't trim) so applyCorrections preserves the
+    // original surrounding whitespace when the result replaces the selection.
+    const text = info.selectionText;
+    if (tab?.id !== undefined && text && text.trim()) void correctSelection(tab.id, text);
     return;
   }
 

@@ -42,6 +42,14 @@ export function buildT5Prompt(sentence: string): string {
   return `Fix the grammar and spelling of this sentence: ${sentence}`;
 }
 
+/**
+ * System + few-shot context for the Chrome Prompt API's `initialPrompts`
+ * (everything {@link buildMessages} produces except the final user sentence).
+ */
+export function buildInitialPrompts(): ChatMessage[] {
+  return buildMessages('').slice(0, -1);
+}
+
 const PREFIX_RE =
   /^\s*(?:corrected(?:\s+(?:sentence|text|version))?|output|answer|result|correction|here(?:'s| is)[^:]*)\s*[:-]\s*/i;
 

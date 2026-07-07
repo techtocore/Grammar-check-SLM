@@ -91,7 +91,15 @@
             <input type="checkbox" id="toggle-site" class="switch" />
           </label>
           <div class="row col">
-            <span class="row-label">Model</span>
+            <span class="row-label">Engine</span>
+            <select id="backend-select" class="select">
+              <option value="auto">Automatic — Chrome AI when available</option>
+              <option value="prompt">Chrome built-in AI (Gemini Nano)</option>
+              <option value="transformers">Local model</option>
+            </select>
+          </div>
+          <div class="row col">
+            <span class="row-label">Local model</span>
             <select id="model-select" class="select"></select>
           </div>
         </div>

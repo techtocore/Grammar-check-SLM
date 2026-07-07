@@ -10,11 +10,11 @@ available and falling back to WASM everywhere else.
 ## ✨ Features
 
 - **🔒 Truly private** — all processing happens locally; nothing is sent to any server.
-- **🤖 State-of-the-art SLM** — defaults to Alibaba's **Qwen3 0.6B** instruction model (fast and
-  reliable on most devices); **Qwen3 1.7B / 4B** are opt-in for higher quality. FLAN-T5 is available
-  as a lightweight fallback.
-- **⚡ WebGPU accelerated** — runs the model in an MV3 **offscreen document** so it can use the GPU,
-  with an automatic WASM fallback.
+- **⚡ Chrome built-in AI** — uses Chrome's **Prompt API (Gemini Nano)** when available: no model
+  download, shared across the browser, and highly efficient. Falls back automatically to a bundled
+  model when it isn't.
+- **🤖 Local SLM fallback** — Alibaba's **Qwen3 0.6B** (default) or **1.7B** via Transformers.js,
+  accelerated by **WebGPU** (with a WASM fallback). FLAN-T5 is available for maximum compatibility.
 - **🎯 Accurate mapping** — a real word-level **LCS diff** maps each fix to an exact text range, so
   suggestions are precise (no more guessing which word changed).
 - **🧠 Sentence-aware** — uses `Intl.Segmenter` to check sentence-by-sentence and **caches** results,
@@ -85,25 +85,29 @@ the page's DevTools console to see `[GrammarSLM:content]` logs if you want to co
 
 Open the extension's **Settings** page (or the ⚙ button in the popup) to configure:
 
-| Setting      | Description                                                             |
-| ------------ | ----------------------------------------------------------------------- |
-| Model        | `Automatic`, Qwen3 0.6B / 1.7B / 4B, or FLAN-T5 Base                    |
-| Acceleration | `Automatic` (WebGPU → WASM), WebGPU only, or WASM only                  |
-| Language     | BCP-47 locale used for sentence segmentation                            |
-| Typing delay | Debounce before a check runs                                            |
-| Fields       | Toggle rich-text and/or input/textarea checking                         |
-| Sites        | Run everywhere, only on an allow list, or everywhere except a deny list |
+| Setting      | Description                                                                    |
+| ------------ | ------------------------------------------------------------------------------ |
+| Engine       | `Automatic` (Chrome built-in AI when available, else local), built-in only, or local only |
+| Model        | Local fallback model: `Automatic`, Qwen3 0.6B / 1.7B, or FLAN-T5 Base           |
+| Acceleration | `Automatic` (WebGPU → WASM), WebGPU only, or WASM only (local models)           |
+| Language     | BCP-47 locale used for sentence segmentation                                   |
+| Typing delay | Debounce before a check runs                                                   |
+| Fields       | Toggle rich-text and/or input/textarea checking                                |
+| Sites        | Run everywhere, only on an allow list, or everywhere except a deny list        |
 
 Right-click the toolbar icon or any text field to quickly toggle checking on the current site.
 Select text anywhere and right-click **“Correct grammar of …”** to correct it in place (or copy the
 result for read-only text).
 
-### Models
+### Engines
 
-The catalogue lives in [`src/shared/models.ts`](src/shared/models.ts). `Automatic` uses the
-recommended **Qwen3 0.6B** — it loads reliably on the widest range of hardware. Larger models
-(**Qwen3 1.7B / 4B**) are opt-in and need significantly more memory (WebGPU recommended). All models
-are the `onnx-community/*-ONNX` builds published for Transformers.js.
+- **Chrome built-in AI (Prompt API / Gemini Nano)** — the default when your Chrome build supports it.
+  Nothing to download in the extension; the model is shared across the browser and very efficient.
+  The Settings page has a one-time **“Set up”** button to download Gemini Nano if needed.
+- **Local models (Transformers.js)** — the fallback. `Automatic` uses the recommended **Qwen3 0.6B**
+  (loads reliably on the widest range of hardware); **Qwen3 1.7B** is opt-in for higher quality, and
+  **FLAN-T5 Base** is a lightweight compatibility option. All are `onnx-community/*-ONNX` builds. The
+  catalogue lives in [`src/shared/models.ts`](src/shared/models.ts).
 
 ## 🧪 Development
 
@@ -121,8 +125,9 @@ offset↔DOM mapping are covered by unit tests under `src/**/*.test.ts`.
 ## 🔧 Tech stack
 
 - TypeScript · Webpack 5 · Chrome Extension Manifest V3 (offscreen document)
-- Transformers.js (ONNX Runtime Web) with WebGPU + WASM
-- Qwen3 SLMs · `Intl.Segmenter` · CSS Custom Highlight API
+- Chrome built-in AI **Prompt API** (Gemini Nano) with a Transformers.js fallback
+- Transformers.js (ONNX Runtime Web) with WebGPU + WASM · Qwen3 SLMs
+- `Intl.Segmenter` · CSS Custom Highlight API
 - Vitest · ESLint · Prettier
 
 ## 🙏 Acknowledgments

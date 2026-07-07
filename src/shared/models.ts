@@ -48,17 +48,6 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
     requiresWebGPU: true,
   },
   {
-    id: 'qwen3-4b',
-    modelId: 'onnx-community/Qwen3-4B-ONNX',
-    label: 'Qwen3 4B · Max quality',
-    description: 'Highest quality. Requires WebGPU and plenty of GPU memory (~4 GB).',
-    task: 'text-generation',
-    approxDownloadMB: 2600,
-    dtype: { webgpu: 'q4f16', wasm: 'q4' },
-    reasoning: true,
-    requiresWebGPU: true,
-  },
-  {
     id: 'flan-t5-base',
     modelId: 'Xenova/flan-t5-base',
     label: 'FLAN-T5 Base · Compatibility',

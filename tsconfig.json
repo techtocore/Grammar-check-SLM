@@ -18,6 +18,7 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "sourceMap": true,
+    "rootDir": ".",
     "outDir": "build"
   },
   "include": ["src", "webpack.config.js", "vitest.config.ts", "eslint.config.js"],

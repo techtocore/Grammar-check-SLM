@@ -3,12 +3,21 @@ import { AUTO_MODEL } from './models';
 
 export type SiteMode = 'all' | 'allowlist' | 'denylist';
 
+/**
+ * Inference backend: `prompt` = Chrome's built-in Gemini Nano (Prompt API),
+ * `transformers` = a local Transformers.js model, `auto` = built-in when
+ * available, otherwise Transformers.js.
+ */
+export type Backend = 'auto' | 'prompt' | 'transformers';
+
 export interface Settings {
   /** Global on/off switch. */
   enabled: boolean;
-  /** Preset id, or `'auto'` to pick based on hardware. */
+  /** Which inference backend to use. */
+  backend: Backend;
+  /** Preset id, or `'auto'` to pick based on hardware (Transformers.js only). */
   model: string;
-  /** Inference backend preference. */
+  /** Inference backend preference (Transformers.js only). */
   device: DevicePreference;
   /** Idle time after typing before a check runs (ms). */
   debounceMs: number;
@@ -29,6 +38,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   enabled: true,
+  backend: 'auto',
   model: AUTO_MODEL,
   device: 'auto',
   debounceMs: 900,

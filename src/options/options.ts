@@ -47,7 +47,7 @@ async function save(patch: Partial<Settings>): Promise<void> {
   });
   flashSaved();
   render();
-  if ('model' in patch) void refreshModels();
+  if ('model' in patch || 'backend' in patch) void refreshModels();
 }
 
 // ---- Model manager ----
@@ -70,7 +70,9 @@ function renderModelStatus(): void {
   const badge = document.createElement('span');
   badge.className = `status-pill ${status.state}`;
   if (status.state === 'loading') badge.textContent = `Loading… ${status.progress}%`;
-  else if (status.state === 'ready') badge.textContent = `Ready · ${status.device.toUpperCase()}`;
+  else if (status.state === 'ready')
+    badge.textContent =
+      status.device === 'built-in' ? 'Ready · Chrome AI' : `Ready · ${status.device.toUpperCase()}`;
   else badge.textContent = 'Load failed';
   container.append(badge);
 
@@ -181,6 +183,81 @@ async function refreshModels(): Promise<void> {
   renderModels();
 }
 
+// ---- Chrome built-in AI (Prompt API) setup ----
+
+function initBuiltinAi(): void {
+  const card = el('ai-card');
+  const statusEl = el('ai-status');
+  const hint = el('ai-hint');
+  const setupBtn = el<HTMLButtonElement>('ai-setup');
+  const progressWrap = el<HTMLDivElement>('ai-progress');
+  const bar = el<HTMLDivElement>('ai-bar');
+  const lm = globalThis.LanguageModel;
+
+  card.hidden = false;
+
+  if (!lm) {
+    hint.textContent =
+      'Chrome built-in AI is not supported in this browser. The extension will use a local model instead.';
+    return;
+  }
+
+  const setPill = (text: string, cls = ''): void => {
+    const pill = document.createElement('span');
+    pill.className = `status-pill ${cls}`.trim();
+    pill.textContent = text;
+    statusEl.replaceChildren(pill);
+  };
+
+  const render = (availability: LanguageModelAvailability): void => {
+    setupBtn.hidden = true;
+    progressWrap.hidden = true;
+    if (availability === 'available') {
+      setPill('Ready', 'ready');
+      hint.textContent = "Chrome's built-in Gemini Nano is ready and used for grammar checks.";
+    } else if (availability === 'downloadable') {
+      setPill('Not set up');
+      hint.textContent =
+        'Download Gemini Nano once to enable the fastest, most efficient on-device checking.';
+      setupBtn.hidden = false;
+    } else if (availability === 'downloading') {
+      setPill('Downloading…');
+      hint.textContent = 'Chrome is downloading Gemini Nano…';
+    } else {
+      setPill('Unavailable', 'error');
+      hint.textContent =
+        'This device does not meet the requirements for Chrome built-in AI. A local model will be used.';
+    }
+  };
+
+  void lm.availability().then(render);
+
+  setupBtn.addEventListener('click', () => {
+    void (async () => {
+      setupBtn.disabled = true;
+      setupBtn.hidden = true;
+      progressWrap.hidden = false;
+      bar.style.width = '0%';
+      try {
+        const session = await lm.create({
+          monitor(monitor) {
+            monitor.addEventListener('downloadprogress', (event) => {
+              bar.style.width = `${Math.round((event as ProgressEvent).loaded * 100)}%`;
+            });
+          },
+        });
+        session.destroy();
+        render('available');
+      } catch (error) {
+        hint.textContent = `Set-up failed: ${error instanceof Error ? error.message : String(error)}`;
+        render(await lm.availability());
+      } finally {
+        setupBtn.disabled = false;
+      }
+    })();
+  });
+}
+
 function modelDescription(id: string): string {
   if (id === AUTO_MODEL) {
     return 'Uses the recommended Qwen3 0.6B model — fast and reliable on most devices.';
@@ -190,9 +267,21 @@ function modelDescription(id: string): string {
   return `${preset.description} (~${preset.approxDownloadMB} MB download, cached after first use).`;
 }
 
+function backendDescription(backend: Settings['backend']): string {
+  if (backend === 'prompt') {
+    return "Uses Chrome's built-in Gemini Nano — fast and efficient, no model download (requires a supported Chrome build).";
+  }
+  if (backend === 'transformers') {
+    return 'Always uses a local Transformers.js model (works in any browser).';
+  }
+  return "Prefers Chrome's built-in AI when available, otherwise falls back to the local model below.";
+}
+
 function render(): void {
   if (!settings) return;
   el<HTMLInputElement>('enabled').checked = settings.enabled;
+  el<HTMLSelectElement>('backend').value = settings.backend;
+  el('backend-desc').textContent = backendDescription(settings.backend);
   el<HTMLSelectElement>('device').value = settings.device;
   el<HTMLInputElement>('language').value = settings.language;
   el<HTMLInputElement>('debounce').value = String(settings.debounceMs);
@@ -220,6 +309,10 @@ function wire(): void {
   el<HTMLInputElement>('enabled').addEventListener(
     'change',
     (e) => void save({ enabled: (e.target as HTMLInputElement).checked }),
+  );
+  el<HTMLSelectElement>('backend').addEventListener(
+    'change',
+    (e) => void save({ backend: (e.target as HTMLSelectElement).value as Settings['backend'] }),
   );
   el<HTMLSelectElement>('model').addEventListener(
     'change',
@@ -296,6 +389,7 @@ async function init(): Promise<void> {
   render();
   wire();
   wireBroadcasts();
+  initBuiltinAi();
   await refreshModels();
   activeStatus = await sendToBackground<ModelStatus | null>({
     type: 'status',

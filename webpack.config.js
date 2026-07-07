@@ -55,6 +55,13 @@ export default (_env, argv) => {
       // Keep deterministic, self-contained entry files (required for MV3).
       splitChunks: false,
       runtimeChunk: false,
+      // Disable scope hoisting. @huggingface/transformers references the whole
+      // `import.meta` object, which webpack synthesizes with an `import.meta.main`
+      // check compiled to `... === __webpack_module__`. Inside a concatenated
+      // (scope-hoisted) module that identifier is never declared, so the offscreen
+      // script throws `__webpack_module__ is not defined` on load. Without
+      // concatenation the check resolves to the real `module` argument instead.
+      concatenateModules: false,
     },
     performance: {
       // The Transformers.js bundle is large by nature; don't fail the build.

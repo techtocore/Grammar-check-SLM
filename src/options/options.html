@@ -23,7 +23,16 @@
           <input type="checkbox" id="enabled" class="switch" />
         </div>
         <div class="field">
-          <label for="model">Model</label>
+          <label for="backend">Engine</label>
+          <select id="backend" class="select">
+            <option value="auto">Automatic — Chrome built-in AI when available, else local</option>
+            <option value="prompt">Chrome built-in AI only (Gemini Nano)</option>
+            <option value="transformers">Local model only (Transformers.js)</option>
+          </select>
+          <p class="hint" id="backend-desc"></p>
+        </div>
+        <div class="field">
+          <label for="model">Local model</label>
           <select id="model" class="select"></select>
           <p class="hint" id="model-desc"></p>
         </div>
@@ -47,6 +56,20 @@
           <label for="minWords">Minimum words before checking</label>
           <input id="minWords" class="input" type="number" min="1" max="50" />
         </div>
+      </section>
+
+      <section class="card" id="ai-card" hidden>
+        <div class="models-head">
+          <h2>Chrome built-in AI</h2>
+          <div class="model-status" id="ai-status"></div>
+        </div>
+        <p class="hint" id="ai-hint"></p>
+        <div class="mini-progress" id="ai-progress" hidden>
+          <div class="mini-bar" id="ai-bar"></div>
+        </div>
+        <button class="model-btn download" id="ai-setup" type="button" hidden>
+          Set up (one-time download)
+        </button>
       </section>
 
       <section class="card">

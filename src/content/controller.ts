@@ -34,7 +34,7 @@ export class FieldController {
     private readonly tooltip: Tooltip,
   ) {
     this.adapter.attach({
-      onInput: () => this.scheduleCheck(),
+      onInput: () => this.onEdited(),
       onReflow: () => this.tooltip.hide(),
       onBlur: () => undefined,
     });
@@ -42,6 +42,14 @@ export class FieldController {
     this.adapter.element.addEventListener('mouseleave', this.onPointerLeave);
     // Check any pre-existing content shortly after attach.
     this.scheduleCheck(400);
+  }
+
+  /** Called on every edit: drop now-stale highlights/tooltip, then debounce a check. */
+  private onEdited(): void {
+    this.requestSeq++; // invalidate any in-flight response
+    this.tooltip.hide();
+    if (this.corrections.length > 0) this.setCorrections([]);
+    this.scheduleCheck();
   }
 
   updateSettings(settings: Settings): void {

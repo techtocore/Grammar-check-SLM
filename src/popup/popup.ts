@@ -39,6 +39,7 @@ function compactStatus(status: ModelStatus | null): string {
   const state = status?.state ?? 'idle';
   if (state === 'loading' && status) return `Loading model… ${status.progress}%`;
   if (state === 'ready' && status) {
+    if (status.device === 'built-in') return 'Ready · Chrome AI';
     return status.device === 'unknown' ? 'Ready' : `Ready · ${status.device.toUpperCase()}`;
   }
   if (state === 'error') return 'Model error — see Controls';
@@ -74,7 +75,10 @@ function renderStatusCard(status: ModelStatus | null): void {
   if (status && (state === 'ready' || state === 'loading')) {
     const preset = MODEL_PRESETS.find((p) => p.modelId === status.modelId);
     const name = preset?.label ?? status.modelId;
-    const device = status.device === 'unknown' ? '' : ` · ${status.device.toUpperCase()}`;
+    const device =
+      status.device === 'unknown' || status.device === 'built-in'
+        ? ''
+        : ` · ${status.device.toUpperCase()}`;
     meta.textContent = `${name}${device}`;
   } else {
     meta.textContent = '';
@@ -303,6 +307,8 @@ function renderControls(): void {
     for (const preset of MODEL_PRESETS) modelSelect.add(new Option(preset.label, preset.id));
   }
   modelSelect.value = settings.model;
+
+  el<HTMLSelectElement>('backend-select').value = settings.backend;
 }
 
 async function updateSettings(patch: Partial<Settings>): Promise<void> {
@@ -324,6 +330,9 @@ function wireControls(): void {
   });
   el<HTMLSelectElement>('model-select').addEventListener('change', (e) => {
     void updateSettings({ model: (e.target as HTMLSelectElement).value });
+  });
+  el<HTMLSelectElement>('backend-select').addEventListener('change', (e) => {
+    void updateSettings({ backend: (e.target as HTMLSelectElement).value as Settings['backend'] });
   });
   const openOptions = (): void => void chrome.runtime.openOptionsPage();
   el<HTMLButtonElement>('open-options').addEventListener('click', openOptions);
@@ -352,14 +361,19 @@ async function init(): Promise<void> {
     if (isStatusBroadcast(message)) renderStatus(message.status);
   });
 
-  renderStatus(
-    await sendToBackground<ModelStatus | null>({ type: 'status', target: 'background' }),
-  );
-
-  // Warm up the model so the Editor is responsive.
-  void sendToBackground<ModelStatus>({ type: 'warmup', target: 'background' })
-    .then(renderStatus)
-    .catch(() => undefined);
+  // Warm up the model (this also loads it) and reflect the result. Show an
+  // optimistic "loading" immediately so the user never sees a confusing "Idle"
+  // while the model is being prepared.
+  if (settings.enabled) {
+    renderStatus({ state: 'loading', progress: 0, modelId: '', device: 'unknown' });
+    void sendToBackground<ModelStatus>({ type: 'warmup', target: 'background' })
+      .then((status) => renderStatus(status))
+      .catch(() => undefined);
+  } else {
+    renderStatus(
+      await sendToBackground<ModelStatus | null>({ type: 'status', target: 'background' }),
+    );
+  }
 
   el<HTMLTextAreaElement>('editor-input').focus();
 }

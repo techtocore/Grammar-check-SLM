@@ -1,6 +1,6 @@
 import type { Correction } from '../core/types';
 import type { DevicePreference } from './models';
-import type { Settings } from './settings';
+import type { Backend, Settings } from './settings';
 
 export type ModelState = 'idle' | 'loading' | 'ready' | 'error' | 'disabled';
 
@@ -9,17 +9,19 @@ export interface ModelStatus {
   /** 0..100 while loading. */
   progress: number;
   modelId: string;
-  device: 'webgpu' | 'wasm' | 'unknown';
+  device: 'webgpu' | 'wasm' | 'built-in' | 'unknown';
   message?: string;
   error?: string;
 }
 
 /**
  * Preferences handed to the offscreen model runner. The runner itself detects
- * WebGPU support and resolves these into a concrete model/backend/quantization.
+ * WebGPU / built-in-AI support and resolves these into a concrete backend.
  */
 export interface RunnerConfig {
-  /** Preset id, or `'auto'`. */
+  /** Backend preference. */
+  backend: Backend;
+  /** Preset id, or `'auto'` (Transformers.js only). */
   model: string;
   device: DevicePreference;
   language: string;

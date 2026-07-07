@@ -34,7 +34,7 @@ export class FieldRegistry {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['contenteditable', 'type'],
+      attributeFilter: ['contenteditable', 'type', 'readonly', 'disabled'],
     });
   }
 
@@ -87,6 +87,20 @@ export class FieldRegistry {
 
   private onMutations(mutations: MutationRecord[]): void {
     for (const mutation of mutations) {
+      if (mutation.type === 'attributes') {
+        const target = mutation.target;
+        // A field may have become ineligible (e.g. <input> changed to password,
+        // or contenteditable/readonly/disabled toggled). Stop checking it.
+        if (
+          target instanceof HTMLElement &&
+          this.controllers.has(target) &&
+          !this.kindFor(target)
+        ) {
+          this.controllers.get(target)?.destroy();
+          this.controllers.delete(target);
+        }
+        continue;
+      }
       for (const node of mutation.removedNodes) {
         if (node instanceof HTMLElement) this.cleanupRemoved(node);
       }
