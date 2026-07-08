@@ -7,6 +7,8 @@ import {
 } from '../shared/messages';
 import { isSiteEnabled, originOf, setSiteEnabled, type Settings } from '../shared/settings';
 import { AUTO_MODEL, MODEL_PRESETS } from '../shared/models';
+import { promptApiLanguageOptions } from '../shared/prompt-language';
+import { takePendingCorrection } from '../shared/pending';
 import { applyCorrections, type Correction } from '../core';
 
 function el<T extends HTMLElement>(id: string): T {
@@ -380,7 +382,7 @@ async function loadAiAvailability(): Promise<void> {
     aiAvailability = 'unsupported';
   } else {
     try {
-      aiAvailability = await lm.availability();
+      aiAvailability = await lm.availability(promptApiLanguageOptions(settings?.language));
     } catch {
       aiAvailability = 'unsupported';
     }
@@ -433,6 +435,29 @@ function wireControls(): void {
 
 // ============================ Init ============================
 
+/**
+ * If the popup was opened from the "Correct grammar of…" context menu on
+ * non-editable text, pick up that selection, drop it into the editor, and
+ * correct it right away. Returns true when a pending selection was handled.
+ */
+async function consumePendingCorrection(): Promise<boolean> {
+  let pending: Awaited<ReturnType<typeof takePendingCorrection>>;
+  try {
+    pending = await takePendingCorrection();
+  } catch {
+    return false;
+  }
+  const text = pending?.text.trim();
+  if (!text) return false;
+
+  activateTab('editor');
+  const input = el<HTMLTextAreaElement>('editor-input');
+  input.value = text;
+  input.focus();
+  runEditorCorrect();
+  return true;
+}
+
 async function init(): Promise<void> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   origin = originOf(tab?.url);
@@ -462,7 +487,11 @@ async function init(): Promise<void> {
     );
   }
 
-  el<HTMLTextAreaElement>('editor-input').focus();
+  // A pending selection (from the context menu) takes over the editor; otherwise
+  // just focus the empty input.
+  if (!(await consumePendingCorrection())) {
+    el<HTMLTextAreaElement>('editor-input').focus();
+  }
 }
 
 void init();

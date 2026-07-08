@@ -3,10 +3,19 @@ import { TextInputAdapter } from './fields/text-input-adapter';
 import { FieldController } from './controller';
 import type { Tooltip } from './tooltip';
 import type { FieldKind } from './fields/types';
+import { isElementVisible } from './fields/visibility';
 import type { Settings } from '../shared/settings';
 import { sendToBackground } from '../shared/messages';
+import { invalidateContext, isContextInvalidationError } from './lifecycle';
 
 const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'email', 'tel', '']);
+
+/** The genuinely focused element, descending through open shadow roots. */
+function deepActiveElement(root: DocumentOrShadowRoot = document): Element | null {
+  const active = root.activeElement;
+  if (active?.shadowRoot) return deepActiveElement(active.shadowRoot) ?? active;
+  return active;
+}
 
 /**
  * Discovers editable fields lazily (on focus), attaches controllers, and cleans
@@ -21,21 +30,40 @@ export class FieldRegistry {
   constructor(
     private settings: Settings,
     private readonly tooltip: Tooltip,
+    private readonly origin: string | null,
   ) {}
 
   start(): void {
     if (this.started) return;
     this.started = true;
     document.addEventListener('focusin', this.onFocusIn, true);
-    if (document.activeElement instanceof HTMLElement) this.maybeAttach(document.activeElement);
+    const active = deepActiveElement();
+    if (active instanceof HTMLElement) this.maybeAttach(active);
     this.scanExisting();
-    this.observer = new MutationObserver((mutations) => this.onMutations(mutations));
-    this.observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['contenteditable', 'type', 'readonly', 'disabled'],
-    });
+    this.syncObserver();
+  }
+
+  /**
+   * Runs the page-wide MutationObserver only while we actually have fields to
+   * watch for removal. On the vast majority of pages nothing is being checked at
+   * any given moment, so this keeps our DOM-observation cost at exactly zero
+   * until the user focuses an editable field.
+   */
+  private syncObserver(): void {
+    if (this.controllers.size > 0) {
+      if (!this.observer) {
+        this.observer = new MutationObserver((mutations) => this.onMutations(mutations));
+        this.observer.observe(document.documentElement, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['contenteditable', 'type', 'readonly', 'disabled'],
+        });
+      }
+    } else if (this.observer) {
+      this.observer.disconnect();
+      this.observer = null;
+    }
   }
 
   /** Attaches to editable fields already present on the page (e.g. pre-filled). */
@@ -48,7 +76,7 @@ export class FieldRegistry {
       if (count >= 40) break;
       if (!this.kindFor(element)) continue;
       // Skip hidden fields (but always include the focused one).
-      if (element.offsetParent === null && element !== document.activeElement) continue;
+      if (element !== document.activeElement && !isElementVisible(element)) continue;
       this.maybeAttach(element);
       count++;
     }
@@ -79,13 +107,41 @@ export class FieldRegistry {
         controller.updateSettings(settings);
       }
     }
+    this.syncObserver();
   }
 
   private readonly onFocusIn = (event: FocusEvent): void => {
-    if (event.target instanceof HTMLElement) this.maybeAttach(event.target);
+    // Fields removed from inside a shadow tree aren't reported by the
+    // documentElement observer, so reconcile on focus changes as a safety net.
+    if (this.pruneDisconnected()) this.syncObserver();
+    // composedPath()[0] is the real focused node even inside an open shadow root
+    // (event.target is retargeted to the shadow host). This lets us check fields
+    // rendered by web components without walking every shadow tree.
+    const target = event.composedPath()[0] ?? event.target;
+    if (target instanceof HTMLElement) this.maybeAttach(target);
   };
 
+  /**
+   * Destroys controllers whose field has left the DOM. `element.isConnected`
+   * catches removals the light-DOM MutationObserver and `Node.contains()` miss —
+   * notably fields inside shadow roots (removed from the shadow tree, or whose
+   * host was detached). Returns whether anything was pruned.
+   */
+  private pruneDisconnected(): boolean {
+    let pruned = false;
+    for (const [element, controller] of [...this.controllers]) {
+      if (!element.isConnected) {
+        controller.destroy();
+        this.controllers.delete(element);
+        pruned = true;
+      }
+    }
+    return pruned;
+  }
+
   private onMutations(mutations: MutationRecord[]): void {
+    const before = this.controllers.size;
+    let sawRemoval = false;
     for (const mutation of mutations) {
       if (mutation.type === 'attributes') {
         const target = mutation.target;
@@ -101,10 +157,16 @@ export class FieldRegistry {
         }
         continue;
       }
+      if (mutation.removedNodes.length > 0) sawRemoval = true;
       for (const node of mutation.removedNodes) {
         if (node instanceof HTMLElement) this.cleanupRemoved(node);
       }
     }
+    // A removed shadow host fires the observer but `host.contains(shadowField)`
+    // is false, so also prune any controller whose field is now disconnected.
+    if (sawRemoval) this.pruneDisconnected();
+    // If that emptied the controller set, stop observing until a field is focused.
+    if (this.controllers.size !== before) this.syncObserver();
   }
 
   private cleanupRemoved(removed: HTMLElement): void {
@@ -124,7 +186,11 @@ export class FieldRegistry {
       kind === 'contenteditable'
         ? new ContentEditableAdapter(element)
         : new TextInputAdapter(element);
-    this.controllers.set(element, new FieldController(adapter, this.settings, this.tooltip));
+    this.controllers.set(
+      element,
+      new FieldController(adapter, this.settings, this.tooltip, this.origin),
+    );
+    this.syncObserver();
     this.warmup();
   }
 
@@ -154,6 +220,8 @@ export class FieldRegistry {
   private warmup(): void {
     if (this.warmedUp) return;
     this.warmedUp = true;
-    void sendToBackground({ type: 'warmup', target: 'background' }).catch(() => undefined);
+    void sendToBackground({ type: 'warmup', target: 'background' }).catch((error: unknown) => {
+      if (isContextInvalidationError(error)) invalidateContext();
+    });
   }
 }

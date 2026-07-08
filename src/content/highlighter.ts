@@ -82,6 +82,10 @@ export class HighlightSet {
 /** A fixed-position layer that draws underline marks from viewport rects. */
 export class Overlay {
   private readonly layer: HTMLDivElement;
+  // Marks are pooled and reused: repositioning only updates styles, never the
+  // DOM tree, which avoids GC churn and stops us from triggering the page's
+  // MutationObserver (and our own) on every scroll frame.
+  private readonly marks: HTMLDivElement[] = [];
 
   constructor() {
     this.layer = document.createElement('div');
@@ -91,22 +95,35 @@ export class Overlay {
   }
 
   setRects(rects: DOMRect[]): void {
-    const marks = rects.map((rect) => {
+    while (this.marks.length < rects.length) {
       const mark = document.createElement('div');
       mark.className = 'gcslm-underline';
-      mark.style.left = `${rect.left}px`;
-      mark.style.top = `${rect.bottom - 2}px`;
-      mark.style.width = `${Math.max(rect.width, 4)}px`;
-      return mark;
-    });
-    this.layer.replaceChildren(...marks);
+      mark.style.display = 'none';
+      this.layer.appendChild(mark);
+      this.marks.push(mark);
+    }
+    for (let i = 0; i < this.marks.length; i++) {
+      const mark = this.marks[i]!;
+      const rect = rects[i];
+      if (rect) {
+        mark.style.left = `${rect.left}px`;
+        mark.style.top = `${rect.bottom - 2}px`;
+        mark.style.width = `${Math.max(rect.width, 4)}px`;
+        mark.style.display = '';
+      } else if (mark.style.display !== 'none') {
+        mark.style.display = 'none';
+      }
+    }
   }
 
   clear(): void {
-    this.layer.replaceChildren();
+    for (const mark of this.marks) {
+      if (mark.style.display !== 'none') mark.style.display = 'none';
+    }
   }
 
   destroy(): void {
     this.layer.remove();
+    this.marks.length = 0;
   }
 }

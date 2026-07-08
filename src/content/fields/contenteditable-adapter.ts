@@ -1,7 +1,9 @@
 import type { Correction } from '../../core/types';
-import type { FieldAdapter, FieldHandlers, FieldKind } from './types';
+import type { CorrectionRect, FieldAdapter, FieldHandlers, FieldKind } from './types';
 import { buildDomText, resolveRange, applyDomEdit, type DomText } from './dom-text';
 import { HighlightSet, Overlay, supportsHighlightApi } from '../highlighter';
+import { rafThrottle, type RafThrottle } from '../schedule';
+import { isElementVisible } from './visibility';
 
 /** Adapter for `contenteditable` elements (Gmail, chat boxes, rich editors, …). */
 export class ContentEditableAdapter implements FieldAdapter {
@@ -9,10 +11,13 @@ export class ContentEditableAdapter implements FieldAdapter {
 
   private dom: DomText;
   private corrections: Correction[] = [];
+  private rects: CorrectionRect[] = [];
   private handlers: FieldHandlers | null = null;
   private readonly useApi = supportsHighlightApi();
   private readonly highlights = new HighlightSet();
   private readonly overlay: Overlay | null;
+  private resizeObserver: ResizeObserver | null = null;
+  private readonly reposition: RafThrottle = rafThrottle(() => this.reflow());
   private readonly disposers: Array<() => void> = [];
 
   constructor(readonly element: HTMLElement) {
@@ -33,9 +38,15 @@ export class ContentEditableAdapter implements FieldAdapter {
         .map((c) => this.displayRange(c.start, c.end))
         .filter((r): r is Range => r !== null && !r.collapsed);
       this.highlights.set(ranges);
-    } else {
-      this.repositionOverlay();
     }
+    // Refresh the hit-test cache (and, on the fallback path, the overlay). With
+    // the Highlight API the underlines track text automatically, but the cached
+    // rects still need refreshing for hover after scroll/resize.
+    this.reflow();
+  }
+
+  correctionRects(): readonly CorrectionRect[] {
+    return this.rects;
   }
 
   /** A non-collapsed range for highlighting; zero-width insertions are widened
@@ -51,6 +62,7 @@ export class ContentEditableAdapter implements FieldAdapter {
 
   clear(): void {
     this.corrections = [];
+    this.rects = [];
     this.highlights.clear();
     this.overlay?.clear();
   }
@@ -82,22 +94,41 @@ export class ContentEditableAdapter implements FieldAdapter {
     const onInput = (): void => handlers.onInput();
     const onBlur = (): void => handlers.onBlur();
     const onReflow = (): void => {
-      this.repositionOverlay();
+      this.reposition.schedule();
       handlers.onReflow();
     };
     this.element.addEventListener('input', onInput);
     this.element.addEventListener('blur', onBlur);
-    window.addEventListener('scroll', onReflow, true);
-    window.addEventListener('resize', onReflow);
+    // Passive listeners never block scrolling; work is deferred to one rAF.
+    window.addEventListener('scroll', onReflow, { capture: true, passive: true });
+    window.addEventListener('resize', onReflow, { passive: true });
+    // The visual viewport moves independently of the layout viewport on pinch-
+    // zoom and when the mobile keyboard opens; track it so overlays stay aligned.
+    const vv = window.visualViewport;
+    vv?.addEventListener('scroll', onReflow, { passive: true });
+    vv?.addEventListener('resize', onReflow, { passive: true });
+    // Editors that grow/shrink (auto-resize composers, resizable panes) fire no
+    // scroll/resize event; a ResizeObserver keeps the cache and overlay honest
+    // (and covers size-changing animations without a noisy global transitionend
+    // listener that would fire for every unrelated transition on the page).
+    if (typeof ResizeObserver === 'function') {
+      this.resizeObserver = new ResizeObserver(() => this.reposition.schedule());
+      this.resizeObserver.observe(this.element);
+    }
     this.disposers.push(
       () => this.element.removeEventListener('input', onInput),
       () => this.element.removeEventListener('blur', onBlur),
       () => window.removeEventListener('scroll', onReflow, true),
       () => window.removeEventListener('resize', onReflow),
+      () => vv?.removeEventListener('scroll', onReflow),
+      () => vv?.removeEventListener('resize', onReflow),
     );
   }
 
   destroy(): void {
+    this.reposition.cancel();
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     this.clear();
     this.overlay?.destroy();
     for (const dispose of this.disposers) dispose();
@@ -105,13 +136,19 @@ export class ContentEditableAdapter implements FieldAdapter {
     this.handlers = null;
   }
 
-  private repositionOverlay(): void {
-    if (!this.overlay) return;
-    const rects: DOMRect[] = [];
-    for (const c of this.corrections) {
-      const rect = this.rectFor(c.start, c.end);
-      if (rect) rects.push(rect);
+  /** Rebuilds the hit-test rect cache and repaints the overlay (fallback path). */
+  private reflow(): void {
+    if (!isElementVisible(this.element)) {
+      this.rects = [];
+      this.overlay?.clear();
+      return;
     }
-    this.overlay.setRects(rects);
+    const rects: CorrectionRect[] = [];
+    for (const correction of this.corrections) {
+      const rect = this.rectFor(correction.start, correction.end);
+      if (rect) rects.push({ correction, rect });
+    }
+    this.rects = rects;
+    if (this.overlay) this.overlay.setRects(rects.map((entry) => entry.rect));
   }
 }

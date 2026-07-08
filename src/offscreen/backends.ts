@@ -10,6 +10,7 @@ import {
 } from '../shared/models';
 import type { ModelStatus, RunnerConfig } from '../shared/messages';
 import { createLogger } from '../shared/logger';
+import { promptApiLanguageOptions } from '../shared/prompt-language';
 
 const log = createLogger('backend');
 
@@ -275,7 +276,10 @@ export class PromptApiBackend implements Backend {
     const lm = globalThis.LanguageModel;
     if (!lm) throw new Error('Chrome built-in AI (Prompt API) is not available in this browser.');
 
-    const availability = await lm.availability();
+    // Pin the input/output language so Chrome can attest output safety (a
+    // missing output language logs a warning and can lower quality).
+    const languageOptions = promptApiLanguageOptions(config.language);
+    const availability = await lm.availability(languageOptions);
     if (availability === 'unavailable') {
       throw new Error('Chrome built-in AI is unavailable on this device.');
     }
@@ -288,7 +292,7 @@ export class PromptApiBackend implements Backend {
 
     const params = await lm.params().catch(() => null);
     const tuning = params ? { topK: 1, temperature: params.defaultTemperature } : {};
-    this.createOptions = { initialPrompts: buildInitialPrompts(), ...tuning };
+    this.createOptions = { initialPrompts: buildInitialPrompts(), ...languageOptions, ...tuning };
 
     onProgress(availability === 'available' ? 100 : 1, 'Chrome built-in AI', 'built-in');
     this.session = await lm.create({

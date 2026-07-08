@@ -74,13 +74,20 @@ export class Corrector {
 
   /** Updates preferences; reloads lazily if the backend/model/device changed. */
   setConfig(config: RunnerConfig): void {
-    const changed =
-      !this.config ||
-      this.config.backend !== config.backend ||
-      this.config.model !== config.model ||
-      this.config.device !== config.device;
+    const prev = this.config;
+    const coreChanged =
+      !prev ||
+      prev.backend !== config.backend ||
+      prev.model !== config.model ||
+      prev.device !== config.device;
+    // The Chrome Prompt API bakes the language into the session at load time, so
+    // a language change needs a session rebuild. Transformers reads the language
+    // per request (for segmentation) and doesn't, so avoid a costly model reload
+    // there — only rebuild when the built-in backend is the one currently loaded.
+    const languageChanged = !!prev && prev.language !== config.language;
+    const needsReload = coreChanged || (languageChanged && this.status.device === 'built-in');
     this.config = config;
-    if (changed) {
+    if (needsReload) {
       this.loadFailedAt = 0;
       this.cache.clear();
       void this.dispose();

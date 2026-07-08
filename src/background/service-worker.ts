@@ -20,6 +20,7 @@ import {
 } from '../shared/settings';
 import { MODEL_PRESETS } from '../shared/models';
 import { deleteModelCache, listCachedModels } from '../shared/model-cache';
+import { setPendingCorrection, clearPendingCorrection } from '../shared/pending';
 import { applyCorrections } from '../core/corrections';
 import { createLogger } from '../shared/logger';
 
@@ -55,11 +56,11 @@ async function ensureConfigured(settings: Settings): Promise<void> {
 
 async function handleCheck(
   text: string,
-  senderUrl: string | undefined,
+  origin: string | null,
   requestId: string,
 ): Promise<CheckResult> {
   const settings = await loadSettings();
-  if (!isSiteEnabled(settings, originOf(senderUrl))) {
+  if (!isSiteEnabled(settings, origin)) {
     return { requestId, sourceText: text, corrections: [] };
   }
   await ensureConfigured(settings);
@@ -225,9 +226,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     case 'check': {
       const { text, requestId } = message;
-      // `sender.url` (the frame URL) is always available; `sender.tab.url` can be
-      // undefined without the "tabs" permission.
-      handleCheck(text, sender.url ?? sender.tab?.url, requestId)
+      // The content script sends its effective governing origin (the top origin
+      // for same-origin editor iframes with opaque about:blank/srcdoc URLs).
+      // Fall back to the frame URL when it wasn't provided.
+      const origin = message.origin ?? originOf(sender.url ?? sender.tab?.url);
+      handleCheck(text, origin, requestId)
         .then(sendResponse)
         .catch((error: unknown) => {
           sendResponse({
@@ -316,32 +319,70 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
 /** Sends a message to a page's content script, ignoring "no receiver" errors. */
-function messageTab(tabId: number, message: ContentMessage): void {
-  chrome.tabs.sendMessage(tabId, message).catch(() => undefined);
+function messageTab(tabId: number, message: ContentMessage, frameId?: number): void {
+  const options = frameId !== undefined ? { frameId } : {};
+  chrome.tabs.sendMessage(tabId, message, options).catch(() => undefined);
 }
 
 /** Corrects the selected text and asks the content script to replace/copy it. */
-async function correctSelection(tabId: number, text: string): Promise<void> {
-  messageTab(tabId, { type: 'gc-correcting', target: 'content' });
+async function correctSelection(tabId: number, text: string, frameId?: number): Promise<void> {
+  messageTab(tabId, { type: 'gc-correcting', target: 'content' }, frameId);
   try {
     const result = await handleCorrect(text, newRequestId());
     const corrected = applyCorrections(text, result.corrections);
-    messageTab(tabId, {
-      type: 'gc-correct-result',
-      target: 'content',
-      corrected,
-      original: text,
-      error: result.error,
-    });
+    messageTab(
+      tabId,
+      {
+        type: 'gc-correct-result',
+        target: 'content',
+        corrected,
+        original: text,
+        error: result.error,
+      },
+      frameId,
+    );
   } catch (error) {
-    messageTab(tabId, {
-      type: 'gc-correct-result',
-      target: 'content',
-      corrected: text,
-      original: text,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    messageTab(
+      tabId,
+      {
+        type: 'gc-correct-result',
+        target: 'content',
+        corrected: text,
+        original: text,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      frameId,
+    );
   }
+}
+
+/**
+ * Opens the extension popup pre-filled with the selected text so the user can
+ * see the correction there. Used for non-editable selections, where in-place
+ * replacement isn't possible.
+ *
+ * The text handoff is fired synchronously (not awaited) so it happens while the
+ * context-menu user gesture is still active — `chrome.action.openPopup()`
+ * requires one. If the popup can't be opened, falls back to correcting the
+ * selection on the page (copy-to-clipboard).
+ */
+async function openPopupWithSelection(
+  text: string,
+  tabId: number | undefined,
+  frameId?: number,
+): Promise<void> {
+  if (typeof chrome.action.openPopup === 'function') {
+    void setPendingCorrection(text).catch(() => undefined);
+    try {
+      await chrome.action.openPopup();
+      return;
+    } catch (error) {
+      log.warn('Could not open the popup; correcting on the page instead.', error);
+      // Don't leave the handoff behind to hijack the next popup open.
+      await clearPendingCorrection().catch(() => undefined);
+    }
+  }
+  if (tabId !== undefined) void correctSelection(tabId, text, frameId);
 }
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
@@ -349,7 +390,15 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     // Keep the raw selection (don't trim) so applyCorrections preserves the
     // original surrounding whitespace when the result replaces the selection.
     const text = info.selectionText;
-    if (tab?.id !== undefined && text && text.trim()) void correctSelection(tab.id, text);
+    if (!text || !text.trim()) return;
+    const tabId = tab?.id;
+    // Editable fields (inputs, textareas, contenteditable) get corrected in
+    // place; non-editable text opens the popup with the correction instead.
+    if (info.editable && tabId !== undefined) {
+      void correctSelection(tabId, text, info.frameId);
+    } else {
+      void openPopupWithSelection(text, tabId, info.frameId);
+    }
     return;
   }
 

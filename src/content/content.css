@@ -28,7 +28,7 @@
 .gcslm-tooltip {
   position: fixed;
   z-index: 2147483647;
-  max-width: 320px;
+  max-width: min(320px, calc(100vw - 24px));
   padding: 10px 12px;
   border-radius: 12px;
   background: #ffffff;
@@ -85,12 +85,14 @@
   appearance: none;
   border: 0;
   border-radius: 8px;
-  padding: 6px 12px;
+  padding: 7px 14px;
+  min-height: 34px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
   transition: filter 0.15s ease;
+  touch-action: manipulation;
 }
 
 .gcslm-btn:hover {

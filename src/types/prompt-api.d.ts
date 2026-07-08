@@ -20,12 +20,21 @@ declare global {
     maxTemperature: number;
   }
 
+  /** A modality + language expectation for a Prompt API session. */
+  interface LanguageModelExpected {
+    type: 'text' | 'image' | 'audio';
+    /** BCP-47 language codes. The Prompt API accepts en, ja, es, de, fr. */
+    languages?: string[];
+  }
+
   interface LanguageModelCreateOptions {
     initialPrompts?: LanguageModelPrompt[];
     temperature?: number;
     topK?: number;
     signal?: AbortSignal;
     monitor?: (monitor: EventTarget) => void;
+    expectedInputs?: LanguageModelExpected[];
+    expectedOutputs?: LanguageModelExpected[];
   }
 
   interface LanguageModelSession {

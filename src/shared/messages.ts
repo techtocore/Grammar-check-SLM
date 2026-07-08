@@ -52,7 +52,7 @@ export type BackgroundMessage =
   | { type: 'status'; target: 'background' }
   | { type: 'warmup'; target: 'background' }
   | { type: 'retry'; target: 'background' }
-  | { type: 'check'; target: 'background'; requestId: string; text: string }
+  | { type: 'check'; target: 'background'; requestId: string; text: string; origin?: string }
   | { type: 'correct'; target: 'background'; requestId: string; text: string }
   | { type: 'settings:get'; target: 'background' }
   | { type: 'settings:set'; target: 'background'; patch: Partial<Settings> }

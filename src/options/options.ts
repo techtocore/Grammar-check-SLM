@@ -7,6 +7,7 @@ import {
 } from '../shared/messages';
 import type { Settings } from '../shared/settings';
 import { AUTO_MODEL, getPreset, MODEL_PRESETS } from '../shared/models';
+import { promptApiLanguageOptions } from '../shared/prompt-language';
 
 function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -230,7 +231,7 @@ function initBuiltinAi(): void {
     }
   };
 
-  void lm.availability().then(render);
+  void lm.availability(promptApiLanguageOptions(settings?.language)).then(render);
 
   setupBtn.addEventListener('click', () => {
     void (async () => {
@@ -240,6 +241,7 @@ function initBuiltinAi(): void {
       bar.style.width = '0%';
       try {
         const session = await lm.create({
+          ...promptApiLanguageOptions(settings?.language),
           monitor(monitor) {
             monitor.addEventListener('downloadprogress', (event) => {
               bar.style.width = `${Math.round((event as ProgressEvent).loaded * 100)}%`;
@@ -250,7 +252,7 @@ function initBuiltinAi(): void {
         render('available');
       } catch (error) {
         hint.textContent = `Set-up failed: ${error instanceof Error ? error.message : String(error)}`;
-        render(await lm.availability());
+        render(await lm.availability(promptApiLanguageOptions(settings?.language)));
       } finally {
         setupBtn.disabled = false;
       }

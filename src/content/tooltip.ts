@@ -28,6 +28,12 @@ export class Tooltip {
   private current: Correction | null = null;
   private callbacks: TooltipCallbacks | null = null;
 
+  // Hides the tooltip when the user taps/clicks anywhere outside it — the only
+  // dismissal path on touch, where there is no pointer-leave.
+  private readonly onOutsidePointerDown = (event: Event): void => {
+    if (!this.root.contains(event.target as Node | null)) this.hide();
+  };
+
   constructor() {
     this.root = document.createElement('div');
     this.root.className = 'gcslm-tooltip';
@@ -100,6 +106,9 @@ export class Tooltip {
     this.root.style.left = `${left}px`;
     this.root.style.top = `${top}px`;
     this.root.style.visibility = 'visible';
+    // addEventListener de-dupes identical registrations, so this is safe to call
+    // on every show; hide() removes it.
+    document.addEventListener('pointerdown', this.onOutsidePointerDown, true);
   }
 
   scheduleHide(delay = 220): void {
@@ -116,6 +125,7 @@ export class Tooltip {
 
   hide(): void {
     this.cancelHide();
+    document.removeEventListener('pointerdown', this.onOutsidePointerDown, true);
     this.root.style.display = 'none';
     this.current = null;
     this.callbacks = null;
@@ -123,6 +133,7 @@ export class Tooltip {
 
   destroy(): void {
     this.cancelHide();
+    document.removeEventListener('pointerdown', this.onOutsidePointerDown, true);
     this.root.remove();
   }
 

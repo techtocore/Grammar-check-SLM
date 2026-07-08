@@ -2,9 +2,17 @@
   "manifest_version": 3,
   "name": "Grammar Check SLM",
   "version": "1.0.0",
-  "description": "Private, on-device grammar checking powered by a local Small Language Model (Qwen3) with WebGPU acceleration.",
+  "description": "Private, on-device grammar and spell checking powered by local small language models with WebGPU acceleration.",
+  "homepage_url": "https://github.com/techtocore/Grammar-check-SLM",
   "minimum_chrome_version": "116",
-  "permissions": ["storage", "unlimitedStorage", "offscreen", "contextMenus", "activeTab", "clipboardWrite"],
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "offscreen",
+    "contextMenus",
+    "activeTab",
+    "clipboardWrite"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -14,7 +22,9 @@
       "matches": ["<all_urls>"],
       "js": ["content.js"],
       "css": ["content.css"],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_origin_as_fallback": true
     }
   ],
   "action": {

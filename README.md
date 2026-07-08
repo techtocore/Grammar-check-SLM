@@ -5,7 +5,7 @@
 ![AI: 100% on-device](https://img.shields.io/badge/AI-100%25%20on--device-10B981)
 ![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen)
 
-A privacy-first browser extension that fixes grammar **entirely on your device**. It uses Chrome's
+A privacy-first browser extension that fixes grammar and spelling **entirely on your device**. It uses Chrome's
 **built-in AI (Gemini Nano)** when available and falls back to a bundled **Qwen3** model via
 [Transformers.js](https://github.com/huggingface/transformers.js) — so your text **never leaves the
 browser**, online or off.
@@ -131,15 +131,32 @@ offset↔DOM mapping are covered by unit tests under `src/**/*.test.ts`.
 - `Intl.Segmenter` · CSS Custom Highlight API
 - Vitest · ESLint · Prettier
 
+## 🔒 Privacy
+
+Your text is checked **entirely on your device** and is never sent to the
+developer or any third party. The extension has no servers, no accounts, no
+analytics, and no tracking. Settings and downloaded model files are stored
+locally. See the full [Privacy Policy](PRIVACY.md).
+
 ## 🙏 Acknowledgments
 
 - [Hugging Face](https://huggingface.co/) for Transformers.js and the ONNX model conversions
 - [Qwen team](https://github.com/QwenLM/Qwen3) for the Qwen3 models
 - AI coding tools including GitHub Copilot
 
+## 📦 Publishing
+
+- **License** — [MIT](LICENSE)
+- **Privacy policy** — [PRIVACY.md](PRIVACY.md) (this is the URL to give the
+  Chrome Web Store dashboard)
+- **Release notes** — [CHANGELOG.md](CHANGELOG.md)
+
+Build the extension with `npm run build`, then zip the **contents** of `build/`
+(with `manifest.json` at the zip root) to upload.
+
 ## 📄 License
 
-MIT
+[MIT](LICENSE) © techtocore
 
 ---
 

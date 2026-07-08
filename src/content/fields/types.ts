@@ -2,6 +2,12 @@ import type { Correction } from '../../core/types';
 
 export type FieldKind = 'contenteditable' | 'textinput';
 
+/** A correction paired with its current viewport rectangle. */
+export interface CorrectionRect {
+  correction: Correction;
+  rect: DOMRect;
+}
+
 export interface FieldHandlers {
   /** Fired when the field's text changes (debounced by the controller). */
   onInput(): void;
@@ -34,6 +40,13 @@ export interface FieldAdapter {
    * suggestion tooltip. Returns null if it cannot be resolved.
    */
   rectFor(start: number, end: number): DOMRect | null;
+
+  /**
+   * Cached viewport rectangles for the current corrections, refreshed whenever
+   * the field is shown, scrolled, or resized. Used for pointer hit-testing so
+   * hovering never forces a layout on every mouse move.
+   */
+  correctionRects(): readonly CorrectionRect[];
 
   /**
    * Applies an edit to the field, replacing [start, end) with `suggestion`.
