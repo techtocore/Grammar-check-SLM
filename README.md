@@ -10,7 +10,7 @@ A privacy-first browser extension that fixes grammar and spelling **entirely on 
 [Transformers.js](https://github.com/huggingface/transformers.js) — so your text **never leaves the
 browser**, online or off.
 
-![Extension pop-up](/assets/pop-up.png)
+![Extension pop-up and suggested corrections](/assets/extension.png)
 
 ## ✨ Features
 
@@ -80,7 +80,6 @@ prompted); a local model instead downloads from Hugging Face and is cached for o
 fields are checked automatically — wavy underlines appear once the engine is ready. Open the page's
 DevTools console for `[GrammarSLM:content]` logs to confirm checks are running.
 
-![Suggested correction](/assets/suggestion.png)
 
 ## ⚙️ Configuration
 

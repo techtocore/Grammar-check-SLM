@@ -59,6 +59,10 @@ function renderStatusCard(status: ModelStatus | null): void {
   const retry = el<HTMLButtonElement>('retry');
 
   const state = status?.state ?? 'idle';
+  // The header already shows the compact status ("Ready · Chrome AI"), so only
+  // surface the standalone card when it adds something: a loading progress bar
+  // or an error with a Retry button. This keeps the Controls panel compact.
+  el('status-card').hidden = state !== 'loading' && state !== 'error';
   dot.className = `dot ${state}`;
   text.textContent =
     state === 'loading' && status
@@ -294,7 +298,9 @@ function renderControls(): void {
   const siteToggle = el<HTMLInputElement>('toggle-site');
   const siteLabel = el('site-label');
   if (origin) {
-    siteLabel.textContent = origin === 'file://' ? 'Local files' : new URL(origin).host;
+    // Local files share one opaque origin; label it "This page" (clearer than
+    // "file://"). Toggling it enables/disables checking on local file pages.
+    siteLabel.textContent = origin === 'file://' ? 'This page' : new URL(origin).host;
     siteToggle.checked = isSiteEnabled(settings, origin);
     siteToggle.disabled = !settings.enabled;
   } else {
@@ -368,8 +374,9 @@ function renderEngine(): void {
 
   el('engine-desc').textContent = engineDescription(backend);
 
-  // Local model is only used by the local/auto engines — hide it for Chrome AI
-  // so the model picker never appears when checks run through Chrome's API.
+  // Hide the local model picker for Chrome AI (it isn't used there); show it for
+  // Automatic (as the fallback model) and Local. This now actually takes effect
+  // thanks to the global `[hidden]` rule overriding `.engine-model{display:flex}`.
   el('engine-model').hidden = backend === 'prompt';
   el('model-label').textContent = backend === 'auto' ? 'Fallback model' : 'Local model';
 

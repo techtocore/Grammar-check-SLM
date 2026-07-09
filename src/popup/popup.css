@@ -2,6 +2,13 @@
   box-sizing: border-box;
 }
 
+/* The `hidden` attribute must win over class rules like `.engine-model {
+   display: flex }`; without this, elements we toggle via `.hidden = true`
+   (the model picker, the status card, …) stay visible. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   width: 384px;

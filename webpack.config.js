@@ -92,23 +92,20 @@ export default (_env, argv) => {
           { from: 'src/popup/popup.css', to: 'popup.css' },
           { from: 'src/options/options.css', to: 'options.css' },
           { from: 'src/content/content.css', to: 'content.css' },
-          // Bundle the ONNX Runtime WebGPU/WASM binaries locally so inference works
-          // under the extension CSP and offline after first model download.
+          // Bundle the ONNX Runtime WASM/WebGPU runtime variants locally so
+          // inference works under the extension CSP and offline after the first
+          // model download. Copy the WHOLE `ort-wasm-simd-threaded*` set (plain,
+          // jsep, asyncify, jspi) rather than a hand-picked list: ORT chooses a
+          // variant at runtime by feature detection, and the names change across
+          // onnxruntime-web releases — a fixed list silently breaks on upgrade
+          // with "Failed to fetch dynamically imported module .../ort/...".
           {
-            from: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm',
-            to: 'ort/ort-wasm-simd-threaded.jsep.wasm',
+            from: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded*.wasm',
+            to: 'ort/[name][ext]',
           },
           {
-            from: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.mjs',
-            to: 'ort/ort-wasm-simd-threaded.jsep.mjs',
-          },
-          {
-            from: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm',
-            to: 'ort/ort-wasm-simd-threaded.wasm',
-          },
-          {
-            from: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs',
-            to: 'ort/ort-wasm-simd-threaded.mjs',
+            from: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded*.mjs',
+            to: 'ort/[name][ext]',
           },
         ],
       }),
