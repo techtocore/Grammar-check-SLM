@@ -66,32 +66,36 @@ export class Corrector {
   private chain: Promise<unknown> = Promise.resolve();
   private status: ModelStatus = { state: 'idle', progress: 0, modelId: '', device: 'unknown' };
 
-  constructor(private readonly onStatus: (status: ModelStatus) => void) {}
+  constructor(
+    private readonly onStatus: (status: ModelStatus) => void,
+    private readonly backendPicker: typeof pickBackends = pickBackends,
+  ) {}
 
   getStatus(): ModelStatus {
     return this.status;
   }
 
-  /** Updates preferences; reloads lazily if the backend/model/device changed. */
-  setConfig(config: RunnerConfig): void {
-    const prev = this.config;
-    const coreChanged =
-      !prev ||
-      prev.backend !== config.backend ||
-      prev.model !== config.model ||
-      prev.device !== config.device;
-    // The Chrome Prompt API bakes the language into the session at load time, so
-    // a language change needs a session rebuild. Transformers reads the language
-    // per request (for segmentation) and doesn't, so avoid a costly model reload
-    // there — only rebuild when the built-in backend is the one currently loaded.
-    const languageChanged = !!prev && prev.language !== config.language;
-    const needsReload = coreChanged || (languageChanged && this.status.device === 'built-in');
-    this.config = config;
-    if (needsReload) {
-      this.loadFailedAt = 0;
-      this.cache.clear();
-      void this.dispose();
-    }
+  /** Updates preferences after any active inference finishes; reloads lazily. */
+  setConfig(config: RunnerConfig): Promise<void> {
+    return this.runExclusive(async () => {
+      const prev = this.config;
+      const coreChanged =
+        !prev ||
+        prev.backend !== config.backend ||
+        prev.model !== config.model ||
+        prev.device !== config.device;
+      // The Chrome Prompt API bakes the language into the session at load time,
+      // so a language change needs a session rebuild. Transformers reads the
+      // language per request and can keep its loaded weights.
+      const languageChanged = !!prev && prev.language !== config.language;
+      const needsReload = coreChanged || (languageChanged && this.status.device === 'built-in');
+      this.config = config;
+      if (needsReload) {
+        this.loadFailedAt = 0;
+        this.cache.clear();
+        await this.dispose();
+      }
+    });
   }
 
   async dispose(): Promise<void> {
@@ -114,7 +118,14 @@ export class Corrector {
     // otherwise clobber a freshly loaded model's "loading"/"ready" status and
     // leave the UI stuck on "idle" after a model switch.
     if (generation === this.loadGeneration) {
-      this.setStatus({ state: 'idle', progress: 0 });
+      this.setStatus({
+        state: 'idle',
+        progress: 0,
+        modelId: '',
+        device: 'unknown',
+        error: undefined,
+        message: undefined,
+      });
     }
   }
 
@@ -125,6 +136,11 @@ export class Corrector {
     }
     if (!this.loadPromise) this.loadPromise = this.load();
     await this.loadPromise;
+  }
+
+  /** Loads the configured backend through the same queue as checks/downloads. */
+  warmup(): Promise<void> {
+    return this.runExclusive(() => this.ensureLoaded());
   }
 
   async correct(text: string): Promise<Correction[]> {
@@ -146,7 +162,9 @@ export class Corrector {
       for (const sentence of sentences) {
         corrected.push(await this.correctSentence(sentence.text));
       }
-      const corrections = assembleCorrections(text, sentences, corrected);
+      const corrections = assembleCorrections(text, sentences, corrected, {
+        locale: config.language,
+      });
       log.debug(`Corrected ${sentences.length} segment(s) → ${corrections.length} suggestion(s).`);
       return corrections;
     });
@@ -165,14 +183,18 @@ export class Corrector {
    * Downloads and caches a Transformers.js model's files without making it
    * active. Progress is broadcast per model.
    */
-  async downloadModel(modelId: string): Promise<void> {
+  async downloadModel(modelId: string, devicePreference: RunnerConfig['device']): Promise<void> {
     const preset = MODEL_PRESETS.find((p) => p.modelId === modelId) ?? getPreset(modelId);
     if (!preset) throw new Error(`Unknown model: ${modelId}`);
     return this.runExclusive(async () => {
+      await this.dispose();
       broadcastDownload({ modelId: preset.modelId, state: 'downloading', progress: 0 });
       try {
-        await downloadTransformersModel(preset, (progress) =>
-          broadcastDownload({ modelId: preset.modelId, state: 'downloading', progress }),
+        await downloadTransformersModel(
+          preset,
+          (progress) =>
+            broadcastDownload({ modelId: preset.modelId, state: 'downloading', progress }),
+          devicePreference,
         );
         broadcastDownload({ modelId: preset.modelId, state: 'done', progress: 100 });
       } catch (error) {
@@ -201,14 +223,28 @@ export class Corrector {
     const generation = ++this.loadGeneration;
     let lastError: unknown = new Error('No backend available');
 
-    for (const makeBackend of pickBackends(config)) {
+    for (const makeBackend of this.backendPicker(config)) {
       if (generation !== this.loadGeneration) return; // superseded before we started
       const backend = makeBackend();
-      this.setStatus({ state: 'loading', progress: 0 });
+      this.setStatus({
+        state: 'loading',
+        progress: 0,
+        modelId: '',
+        device: 'unknown',
+        error: undefined,
+        message: undefined,
+      });
       try {
         const info = await backend.load(config, (progress, modelId, device) => {
           if (generation === this.loadGeneration) {
-            this.setStatus({ state: 'loading', progress, modelId, device });
+            this.setStatus({
+              state: 'loading',
+              progress,
+              modelId,
+              device,
+              error: undefined,
+              message: undefined,
+            });
           }
         });
         if (generation !== this.loadGeneration) {
@@ -217,7 +253,14 @@ export class Corrector {
         }
         this.backend = backend;
         this.loadFailedAt = 0;
-        this.setStatus({ state: 'ready', progress: 100, modelId: info.label, device: info.device });
+        this.setStatus({
+          state: 'ready',
+          progress: 100,
+          modelId: info.modelId,
+          device: info.device,
+          error: undefined,
+          message: undefined,
+        });
         return;
       } catch (error) {
         lastError = error;
@@ -248,13 +291,7 @@ export class Corrector {
     const backend = this.backend;
     if (!backend) return sentence;
 
-    let raw: string;
-    try {
-      raw = await backend.generate(sentence);
-    } catch (error) {
-      log.error('Generation failed for a sentence.', error);
-      return sentence;
-    }
+    const raw = await backend.generate(sentence);
 
     const cleaned = cleanModelOutput(raw, sentence);
     this.cache.set(sentence, cleaned);

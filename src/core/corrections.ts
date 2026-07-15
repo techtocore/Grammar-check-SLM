@@ -1,6 +1,6 @@
 import type { Correction, Sentence } from './types';
 import { diffWords } from './diff';
-import { tokenize } from './tokenize';
+import { tokenizeWords } from './tokenize';
 
 export interface AssembleOptions {
   /**
@@ -15,6 +15,8 @@ export interface AssembleOptions {
   minLengthRatio?: number;
   /** Minimum sentence length (chars) to bother checking. */
   minSentenceLength?: number;
+  /** Locale used for word segmentation and diff alignment. */
+  locale?: string;
 }
 
 const DEFAULTS: Required<AssembleOptions> = {
@@ -22,6 +24,7 @@ const DEFAULTS: Required<AssembleOptions> = {
   maxLengthRatio: 2.2,
   minLengthRatio: 0.4,
   minSentenceLength: 2,
+  locale: 'en',
 };
 
 /**
@@ -39,7 +42,7 @@ export function assembleCorrections(
   correctedSentences: readonly string[],
   options: AssembleOptions = {},
 ): Correction[] {
-  const { maxWordRatio, maxLengthRatio, minLengthRatio, minSentenceLength } = {
+  const { maxWordRatio, maxLengthRatio, minLengthRatio, minSentenceLength, locale } = {
     ...DEFAULTS,
     ...options,
   };
@@ -54,19 +57,25 @@ export function assembleCorrections(
     const cleanedCorrected = corrected.trim();
     if (!cleanedCorrected || cleanedCorrected === sentence.text.trim()) continue;
 
-    const edits = diffWords(sentence.text, cleanedCorrected);
+    const edits = diffWords(sentence.text, cleanedCorrected, locale);
     if (edits.length === 0) continue;
 
     // Hallucination guards.
     const lengthRatio = cleanedCorrected.length / sentence.text.length;
     if (lengthRatio > maxLengthRatio || lengthRatio < minLengthRatio) continue;
 
-    const originalTokens = tokenize(sentence.text);
-    const changedTokens = originalTokens.filter((t) =>
-      edits.some((e) => e.kind !== 'insert' && t.start < e.end && t.end > e.start),
+    const originalTokens = tokenizeWords(sentence.text, locale);
+    const changedSourceTokens = originalTokens.filter((token) =>
+      edits.some(
+        (edit) => edit.kind !== 'insert' && token.start < edit.end && token.end > edit.start,
+      ),
     ).length;
+    const insertedTokens = edits
+      .filter((edit) => edit.kind === 'insert')
+      .reduce((count, edit) => count + tokenizeWords(edit.suggestion, locale).length, 0);
+    const changedTokens = changedSourceTokens + insertedTokens;
     const wordRatio = originalTokens.length > 0 ? changedTokens / originalTokens.length : 0;
-    if (originalTokens.length >= 3 && wordRatio > maxWordRatio) continue;
+    if (originalTokens.length >= 3 && wordRatio >= maxWordRatio) continue;
 
     for (const edit of edits) {
       corrections.push({

@@ -34,10 +34,16 @@ export class Tooltip {
     if (!this.root.contains(event.target as Node | null)) this.hide();
   };
 
+  private readonly onDocumentKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') this.hide();
+  };
+
   constructor() {
     this.root = document.createElement('div');
     this.root.className = 'gcslm-tooltip';
     this.root.style.display = 'none';
+    this.root.setAttribute('role', 'dialog');
+    this.root.setAttribute('aria-label', 'Grammar suggestion');
 
     this.label = document.createElement('div');
     this.label.className = 'gcslm-tooltip-label';
@@ -98,10 +104,18 @@ export class Tooltip {
 
     const size = this.root.getBoundingClientRect();
     const margin = 8;
-    let left = Math.min(Math.max(margin, rect.left), window.innerWidth - size.width - margin);
-    if (!Number.isFinite(left) || left < margin) left = margin;
+    const viewport = window.visualViewport;
+    const viewportLeft = viewport?.offsetLeft ?? 0;
+    const viewportTop = viewport?.offsetTop ?? 0;
+    const viewportWidth = viewport?.width ?? window.innerWidth;
+    const viewportHeight = viewport?.height ?? window.innerHeight;
+    const maxLeft = viewportLeft + viewportWidth - size.width - margin;
+    let left = Math.min(Math.max(viewportLeft + margin, rect.left), maxLeft);
+    if (!Number.isFinite(left) || left < viewportLeft + margin) left = viewportLeft + margin;
     let top = rect.top - size.height - margin;
-    if (top < margin) top = rect.bottom + margin;
+    if (top < viewportTop + margin) top = rect.bottom + margin;
+    const maxTop = viewportTop + viewportHeight - size.height - margin;
+    top = Math.min(Math.max(viewportTop + margin, top), Math.max(viewportTop + margin, maxTop));
 
     this.root.style.left = `${left}px`;
     this.root.style.top = `${top}px`;
@@ -109,6 +123,7 @@ export class Tooltip {
     // addEventListener de-dupes identical registrations, so this is safe to call
     // on every show; hide() removes it.
     document.addEventListener('pointerdown', this.onOutsidePointerDown, true);
+    document.addEventListener('keydown', this.onDocumentKeyDown, true);
   }
 
   scheduleHide(delay = 220): void {
@@ -126,6 +141,7 @@ export class Tooltip {
   hide(): void {
     this.cancelHide();
     document.removeEventListener('pointerdown', this.onOutsidePointerDown, true);
+    document.removeEventListener('keydown', this.onDocumentKeyDown, true);
     this.root.style.display = 'none';
     this.current = null;
     this.callbacks = null;
@@ -134,6 +150,7 @@ export class Tooltip {
   destroy(): void {
     this.cancelHide();
     document.removeEventListener('pointerdown', this.onOutsidePointerDown, true);
+    document.removeEventListener('keydown', this.onDocumentKeyDown, true);
     this.root.remove();
   }
 

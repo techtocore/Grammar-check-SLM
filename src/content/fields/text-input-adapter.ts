@@ -109,16 +109,46 @@ export class TextInputAdapter implements FieldAdapter {
     if (start < 0 || end > value.length || start > end) return false;
     if (value.slice(start, end) !== expectedOriginal) return false;
 
+    const before = new InputEvent('beforeinput', {
+      bubbles: true,
+      composed: true,
+      cancelable: true,
+      inputType: 'insertReplacementText',
+      data: suggestion,
+    });
+    if (!this.field.dispatchEvent(before)) return false;
+
+    const selectionStart = this.field.selectionStart;
+    const selectionEnd = this.field.selectionEnd;
+    const selectionDirection = this.field.selectionDirection;
     const next = value.slice(0, start) + suggestion + value.slice(end);
     setNativeValue(this.field, next);
-    const caret = start + suggestion.length;
-    try {
-      this.field.setSelectionRange(caret, caret);
-    } catch {
-      /* some input types disallow selection */
+    if (selectionStart !== null && selectionEnd !== null) {
+      const delta = suggestion.length - (end - start);
+      const adjust = (position: number): number => {
+        if (position < start) return position;
+        if (position > end || position === end) return position + delta;
+        if (position === start) return start;
+        return start + suggestion.length;
+      };
+      try {
+        this.field.setSelectionRange(
+          adjust(selectionStart),
+          adjust(selectionEnd),
+          selectionDirection ?? undefined,
+        );
+      } catch {
+        /* some input types disallow selection */
+      }
     }
-    this.field.dispatchEvent(new Event('input', { bubbles: true }));
-    this.field.dispatchEvent(new Event('change', { bubbles: true }));
+    this.field.dispatchEvent(
+      new InputEvent('input', {
+        bubbles: true,
+        composed: true,
+        inputType: 'insertReplacementText',
+        data: suggestion,
+      }),
+    );
     return true;
   }
 

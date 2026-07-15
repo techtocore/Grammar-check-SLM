@@ -3,7 +3,16 @@ import { createLogger } from '../shared/logger';
 const log = createLogger('offscreen-mgr');
 const OFFSCREEN_PATH = 'offscreen.html';
 
-let creating: Promise<void> | null = null;
+let lifecycle: Promise<unknown> = Promise.resolve();
+
+function runLifecycle<T>(task: () => Promise<T>): Promise<T> {
+  const run = lifecycle.then(task, task);
+  lifecycle = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
 
 async function hasOffscreenDocument(): Promise<boolean> {
   const url = chrome.runtime.getURL(OFFSCREEN_PATH);
@@ -21,27 +30,30 @@ export function offscreenExists(): Promise<boolean> {
 
 /** Ensures exactly one offscreen document exists to host the model runner. */
 export async function ensureOffscreen(): Promise<void> {
-  if (await hasOffscreenDocument()) return;
+  return runLifecycle(async () => {
+    if (await hasOffscreenDocument()) return;
+    try {
+      await chrome.offscreen.createDocument({
+        url: OFFSCREEN_PATH,
+        reasons: [chrome.offscreen.Reason.WORKERS],
+        justification:
+          'Runs a local small language model (WebGPU/WASM) for on-device grammar checking.',
+      });
+    } catch (error) {
+      // Chrome rejects when another caller won the race. Swallow only that
+      // known-good outcome; otherwise preserve the actionable creation error.
+      if (await hasOffscreenDocument().catch(() => false)) {
+        log.warn('createDocument reported an error after another caller created it.', error);
+        return;
+      }
+      throw error;
+    }
+  });
+}
 
-  if (creating) {
-    await creating;
-    return;
-  }
-
-  creating = chrome.offscreen
-    .createDocument({
-      url: OFFSCREEN_PATH,
-      reasons: [chrome.offscreen.Reason.WORKERS],
-      justification:
-        'Runs a local small language model (WebGPU/WASM) for on-device grammar checking.',
-    })
-    .catch((error: unknown) => {
-      // A concurrent caller may have created it first; that is fine.
-      log.warn('createDocument reported an error (may already exist).', error);
-    })
-    .finally(() => {
-      creating = null;
-    });
-
-  await creating;
+/** Closes the model runner after any in-progress creation finishes. */
+export function closeOffscreen(): Promise<void> {
+  return runLifecycle(async () => {
+    if (await hasOffscreenDocument()) await chrome.offscreen.closeDocument();
+  });
 }

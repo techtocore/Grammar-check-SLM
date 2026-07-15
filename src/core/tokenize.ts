@@ -16,3 +16,28 @@ export function tokenize(text: string): WordToken[] {
   }
   return tokens;
 }
+
+function wordSegmenter(locale: string): Intl.Segmenter | null {
+  if (typeof Intl === 'undefined' || typeof Intl.Segmenter !== 'function') return null;
+  try {
+    return new Intl.Segmenter(locale.replaceAll('_', '-'), { granularity: 'word' });
+  } catch {
+    return new Intl.Segmenter('en', { granularity: 'word' });
+  }
+}
+
+/** Locale-aware word tokens used for thresholds and rewrite detection. */
+export function tokenizeWords(text: string, locale = 'en'): WordToken[] {
+  const segmenter = wordSegmenter(locale);
+  if (!segmenter) return tokenize(text);
+  const tokens: WordToken[] = [];
+  for (const part of segmenter.segment(text)) {
+    if (!part.isWordLike) continue;
+    tokens.push({ text: part.segment, start: part.index, end: part.index + part.segment.length });
+  }
+  return tokens;
+}
+
+export function countWords(text: string, locale = 'en'): number {
+  return tokenizeWords(text, locale).length;
+}

@@ -86,4 +86,10 @@ describe('diffWords', () => {
     const edits = diffWords('hello world', 'Hello world.');
     expect(apply('hello world', edits)).toBe('Hello world.');
   });
+
+  it('inserts Japanese text without synthesizing spaces', () => {
+    const original = '私は学生です。';
+    const corrected = '私は良い学生です。';
+    expect(apply(original, diffWords(original, corrected, 'ja'))).toBe(corrected);
+  });
 });

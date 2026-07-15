@@ -22,7 +22,12 @@ export function segmentSentences(text: string, locale = 'en'): Sentence[] {
   };
 
   if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
-    const segmenter = new Intl.Segmenter(locale, { granularity: 'sentence' });
+    let segmenter: Intl.Segmenter;
+    try {
+      segmenter = new Intl.Segmenter(locale.replaceAll('_', '-'), { granularity: 'sentence' });
+    } catch {
+      segmenter = new Intl.Segmenter('en', { granularity: 'sentence' });
+    }
     for (const { segment, index } of segmenter.segment(text)) {
       push(segment, index);
     }
@@ -30,7 +35,7 @@ export function segmentSentences(text: string, locale = 'en'): Sentence[] {
   }
 
   // Fallback: split on sentence-final punctuation followed by whitespace/end.
-  const re = /[^.!?\n]*[.!?]+|\S[^.!?\n]*$/g;
+  const re = /[^.!?\n]+(?:[.!?]+|(?=\n|$))|[.!?]+/g;
   let match: RegExpExecArray | null;
   while ((match = re.exec(text)) !== null) {
     if (match[0].length === 0) {
@@ -48,6 +53,9 @@ export function segmentSentences(text: string, locale = 'en'): Sentence[] {
  * the model can handle it instead of the whole segment being skipped.
  */
 export function splitLongSentence(sentence: Sentence, maxLen: number): Sentence[] {
+  if (!Number.isInteger(maxLen) || maxLen < 1) {
+    throw new RangeError('maxLen must be a positive integer');
+  }
   if (sentence.text.length <= maxLen) return [sentence];
 
   const result: Sentence[] = [];
@@ -61,18 +69,51 @@ export function splitLongSentence(sentence: Sentence, maxLen: number): Sentence[
     result.push({ text: trimmed, start, end: start + trimmed.length });
   };
 
-  const wordRe = /\S+/g;
-  let match: RegExpExecArray | null;
-  let chunkStart = 0;
-  let lastWordEnd = 0;
-  while ((match = wordRe.exec(text)) !== null) {
-    const wordEnd = match.index + match[0].length;
-    if (wordEnd - chunkStart > maxLen && lastWordEnd > chunkStart) {
-      pushChunk(chunkStart, lastWordEnd);
-      chunkStart = match.index;
+  const safeHardEnd = (start: number): number => {
+    const limit = Math.min(start + maxLen, text.length);
+    if (limit === text.length) return limit;
+
+    if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+      const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+      let boundary = start;
+      for (const part of graphemes.segment(text.slice(start))) {
+        const candidate = start + part.index + part.segment.length;
+        if (candidate > limit) {
+          // A single extended grapheme may be longer than maxLen. Keep it
+          // intact even though that one chunk must exceed the nominal limit.
+          return boundary > start ? boundary : candidate;
+        }
+        boundary = candidate;
+      }
+      if (boundary > start) return boundary;
     }
-    lastWordEnd = wordEnd;
+
+    // A single grapheme can theoretically exceed a very small maxLen. Keep
+    // the UTF-16 pair intact where possible, then make forward progress.
+    const splitsSurrogatePair =
+      limit > start &&
+      /[\uD800-\uDBFF]/.test(text[limit - 1] ?? '') &&
+      /[\uDC00-\uDFFF]/.test(text[limit] ?? '');
+    if (!splitsSurrogatePair) return limit;
+    return limit - 1 > start ? limit - 1 : Math.min(limit + 1, text.length);
+  };
+
+  let chunkStart = 0;
+  while (chunkStart < text.length) {
+    while (/\s/.test(text[chunkStart] ?? '')) chunkStart++;
+    if (chunkStart >= text.length) break;
+
+    const limit = Math.min(chunkStart + maxLen, text.length);
+    let chunkEnd = limit;
+    if (limit < text.length) {
+      const window = text.slice(chunkStart, limit + 1);
+      const whitespace = [...window.matchAll(/\s+/g)].filter((match) => match.index > 0);
+      const lastWhitespace = whitespace.at(-1);
+      chunkEnd = lastWhitespace ? chunkStart + lastWhitespace.index : safeHardEnd(chunkStart);
+    }
+
+    pushChunk(chunkStart, chunkEnd);
+    chunkStart = chunkEnd;
   }
-  if (lastWordEnd > chunkStart) pushChunk(chunkStart, lastWordEnd);
   return result.length > 0 ? result : [sentence];
 }

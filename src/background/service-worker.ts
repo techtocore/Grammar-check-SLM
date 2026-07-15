@@ -1,6 +1,8 @@
-import { ensureOffscreen, offscreenExists } from './offscreen-manager';
+import { closeOffscreen, ensureOffscreen, offscreenExists } from './offscreen-manager';
 import {
+  isAuthorizedBackgroundMessage,
   isBackgroundMessage,
+  isOffscreenSender,
   isStatusBroadcast,
   newRequestId,
   sendToOffscreen,
@@ -30,7 +32,6 @@ const CONTEXT_MENU_TOGGLE = 'gcslm-toggle-site';
 const CONTEXT_MENU_CORRECT = 'gcslm-correct-selection';
 
 let lastStatus: ModelStatus | null = null;
-let currentModelKey = '';
 
 function runnerConfig(settings: Settings): RunnerConfig {
   return {
@@ -50,8 +51,12 @@ function runnerConfig(settings: Settings): RunnerConfig {
 async function ensureConfigured(settings: Settings): Promise<void> {
   await ensureOffscreen();
   const config = runnerConfig(settings);
-  await sendToOffscreen({ type: 'config', target: 'offscreen', config });
-  currentModelKey = `${config.backend}|${config.model}|${config.device}`;
+  const response = await sendToOffscreen<{ ok: boolean; error?: string }>({
+    type: 'config',
+    target: 'offscreen',
+    config,
+  });
+  if (!response.ok) throw new Error(response.error ?? 'Could not configure the model runner.');
 }
 
 async function handleCheck(
@@ -94,7 +99,8 @@ async function handleStatus(): Promise<ModelStatus> {
     return { state: 'disabled', progress: 0, modelId: '', device: 'unknown' };
   }
   if (!(await offscreenExists())) {
-    return lastStatus ?? { state: 'idle', progress: 0, modelId: '', device: 'unknown' };
+    lastStatus = { state: 'idle', progress: 0, modelId: '', device: 'unknown' };
+    return lastStatus;
   }
   try {
     const status = await sendToOffscreen<ModelStatus>({ type: 'status', target: 'offscreen' });
@@ -105,30 +111,41 @@ async function handleStatus(): Promise<ModelStatus> {
   }
 }
 
-async function reconfigureIfRunning(): Promise<void> {
-  const settings = await loadSettings();
-  const config = runnerConfig(settings);
-  const newModelKey = `${config.backend}|${config.model}|${config.device}`;
+const RUNNER_SETTING_KEYS: ReadonlySet<keyof Settings> = new Set([
+  'backend',
+  'model',
+  'device',
+  'language',
+]);
 
-  if (!(await offscreenExists())) {
-    currentModelKey = '';
+function affectsRunner(patch: Partial<Settings>): boolean {
+  return Object.keys(patch).some((key) => RUNNER_SETTING_KEYS.has(key as keyof Settings));
+}
+
+async function syncRunnerAfterSettings(
+  settings: Settings,
+  patch: Partial<Settings>,
+): Promise<void> {
+  if (!settings.enabled) {
+    await closeOffscreen().catch((error: unknown) =>
+      log.warn('Could not close the offscreen model after disabling.', error),
+    );
+    lastStatus = { state: 'disabled', progress: 0, modelId: '', device: 'unknown' };
     return;
   }
 
-  if (currentModelKey !== '' && newModelKey !== currentModelKey) {
-    // Model or backend changed: fully tear down the offscreen document so ALL of
-    // the previous model's memory (WASM heap, GPU buffers, ArrayBuffers) is
-    // reclaimed, then recreate it fresh. Reusing the document leaks memory across
-    // switches and eventually prevents any model from loading.
-    await chrome.offscreen.closeDocument().catch(() => undefined);
-    currentModelKey = '';
-    if (settings.enabled) {
-      await ensureConfigured(settings);
-      void sendToOffscreen({ type: 'warmup', target: 'offscreen' }).catch(() => undefined);
-    }
-  } else {
-    // Same model/backend (or unknown): update configuration in place.
-    await ensureConfigured(settings);
+  if (patch.enabled === true) {
+    lastStatus = { state: 'idle', progress: 0, modelId: '', device: 'unknown' };
+    return;
+  }
+
+  if (affectsRunner(patch)) {
+    // Release all old WASM/GPU memory, but do not recreate or warm the new model
+    // until the user actually requests a correction.
+    await closeOffscreen().catch((error: unknown) =>
+      log.warn('Could not close the model runner after reconfiguration.', error),
+    );
+    lastStatus = { state: 'idle', progress: 0, modelId: '', device: 'unknown' };
   }
 }
 
@@ -147,6 +164,7 @@ async function handleModelsList(): Promise<ModelInfo[]> {
   const settings = await loadSettings();
   const cached = await listCachedModels(MODEL_PRESETS.map((p) => p.modelId));
   const localActive = settings.backend !== 'prompt';
+  const activeModel = settings.model === 'auto' ? 'qwen3-0.6b' : settings.model;
   return MODEL_PRESETS.map((preset) => ({
     id: preset.id,
     modelId: preset.modelId,
@@ -155,28 +173,43 @@ async function handleModelsList(): Promise<ModelInfo[]> {
     approxDownloadMB: preset.approxDownloadMB,
     requiresWebGPU: preset.requiresWebGPU ?? false,
     cached: cached[preset.modelId] ?? false,
-    active: localActive && settings.model === preset.id,
+    active: localActive && activeModel === preset.id,
   }));
 }
 
 async function handleModelsDownload(modelId: string): Promise<{ ok: boolean }> {
+  if (!MODEL_PRESETS.some((preset) => preset.modelId === modelId)) return { ok: false };
+  const settings = await loadSettings();
   await ensureOffscreen();
   // The offscreen document acknowledges immediately and reports progress via broadcasts.
-  await sendToOffscreen({ type: 'download', target: 'offscreen', modelId });
+  await sendToOffscreen({
+    type: 'download',
+    target: 'offscreen',
+    modelId,
+    device: settings.device,
+  });
   return { ok: true };
 }
 
 async function handleModelsDelete(modelId: string): Promise<{ ok: boolean; deleted: number }> {
+  if (!MODEL_PRESETS.some((preset) => preset.modelId === modelId)) {
+    return { ok: false, deleted: 0 };
+  }
   const deleted = await deleteModelCache(modelId);
   return { ok: true, deleted };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (isStatusBroadcast(message)) {
+    if (!isOffscreenSender(sender, chrome.runtime.id)) return undefined;
     lastStatus = message.status;
     return undefined;
   }
   if (!isBackgroundMessage(message)) return undefined;
+  if (!isAuthorizedBackgroundMessage(message, sender, chrome.runtime.id)) {
+    log.warn(`Rejected unauthorized ${message.type} message.`);
+    return undefined;
+  }
 
   switch (message.type) {
     case 'status': {
@@ -226,10 +259,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     case 'check': {
       const { text, requestId } = message;
-      // The content script sends its effective governing origin (the top origin
-      // for same-origin editor iframes with opaque about:blank/srcdoc URLs).
-      // Fall back to the frame URL when it wasn't provided.
-      const origin = message.origin ?? originOf(sender.url ?? sender.tab?.url);
+      // Sender metadata is supplied by Chrome and cannot be spoofed by a page.
+      // Opaque about:blank/srcdoc frames inherit the top tab's governing origin.
+      const origin = originOf(sender.url) ?? originOf(sender.tab?.url);
       handleCheck(text, origin, requestId)
         .then(sendResponse)
         .catch((error: unknown) => {
@@ -265,15 +297,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'settings:set': {
       saveSettings(message.patch)
         .then(async (settings) => {
-          await reconfigureIfRunning();
-          if (settings.enabled) {
-            // Proactively (re)load the model so it becomes ready without the
-            // user having to open the popup — covers enabling the extension
-            // when no offscreen document exists yet.
-            void handleWarmup().catch((error: unknown) =>
-              log.warn('Warmup after settings change failed.', error),
-            );
-          }
+          await syncRunnerAfterSettings(settings, message.patch);
           sendResponse(settings);
         })
         .catch(() => sendResponse(null));
@@ -293,7 +317,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // ---- Context menu: quickly toggle checking on the current site ----
 
-chrome.runtime.onInstalled.addListener((details) => {
+chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create(
     {
       id: CONTEXT_MENU_CORRECT,
@@ -310,12 +334,6 @@ chrome.runtime.onInstalled.addListener((details) => {
     },
     () => void chrome.runtime.lastError,
   );
-
-  // Start downloading/preparing the active model right after install/update so
-  // it is ready (and cached) before the user first types.
-  if (details.reason === 'install' || details.reason === 'update') {
-    void handleWarmup().catch((error: unknown) => log.warn('Initial model warmup failed.', error));
-  }
 });
 
 /** Sends a message to a page's content script, ignoring "no receiver" errors. */
@@ -326,15 +344,21 @@ function messageTab(tabId: number, message: ContentMessage, frameId?: number): v
 
 /** Corrects the selected text and asks the content script to replace/copy it. */
 async function correctSelection(tabId: number, text: string, frameId?: number): Promise<void> {
-  messageTab(tabId, { type: 'gc-correcting', target: 'content' }, frameId);
+  const requestId = newRequestId();
+  messageTab(
+    tabId,
+    { type: 'gc-correcting', target: 'content', requestId, original: text },
+    frameId,
+  );
   try {
-    const result = await handleCorrect(text, newRequestId());
+    const result = await handleCorrect(text, requestId);
     const corrected = applyCorrections(text, result.corrections);
     messageTab(
       tabId,
       {
         type: 'gc-correct-result',
         target: 'content',
+        requestId,
         corrected,
         original: text,
         error: result.error,
@@ -347,6 +371,7 @@ async function correctSelection(tabId: number, text: string, frameId?: number): 
       {
         type: 'gc-correct-result',
         target: 'content',
+        requestId,
         corrected: text,
         original: text,
         error: error instanceof Error ? error.message : String(error),
@@ -409,7 +434,6 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
       const settings = await loadSettings();
       const enabled = isSiteEnabled(settings, origin);
       await saveSettings(setSiteEnabled(settings, origin, !enabled));
-      await reconfigureIfRunning();
     })();
   }
 });

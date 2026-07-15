@@ -1,5 +1,5 @@
 export * from './types';
-export { tokenize } from './tokenize';
+export { tokenize, tokenizeWords, countWords } from './tokenize';
 export { diffWords } from './diff';
 export { segmentSentences, splitLongSentence } from './segment';
 export { LRUCache } from './cache';

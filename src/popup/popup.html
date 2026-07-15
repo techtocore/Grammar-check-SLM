@@ -12,7 +12,9 @@
         <img class="logo" src="icons/icon48.png" alt="" />
         <div class="titles">
           <h1>Grammar Check</h1>
-          <p class="subtitle" id="header-status">Private · on-device AI</p>
+          <p class="subtitle" id="header-status" role="status" aria-live="polite">
+            Private · on-device AI
+          </p>
         </div>
         <button
           class="icon-btn"
@@ -26,17 +28,36 @@
       </header>
 
       <nav class="tabs" role="tablist">
-        <button class="tab active" id="tab-editor" data-tab="editor" type="button" role="tab">
+        <button
+          class="tab active"
+          id="tab-editor"
+          data-tab="editor"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="panel-editor"
+          tabindex="0"
+        >
           Editor
         </button>
-        <button class="tab" id="tab-controls" data-tab="controls" type="button" role="tab">
+        <button
+          class="tab"
+          id="tab-controls"
+          data-tab="controls"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="panel-controls"
+          tabindex="-1"
+        >
           Controls
         </button>
       </nav>
 
       <!-- ===== Editor ===== -->
-      <section class="panel" id="panel-editor" role="tabpanel">
+      <section class="panel" id="panel-editor" role="tabpanel" aria-labelledby="tab-editor">
         <div class="editor">
+          <label class="sr-only" for="editor-input">Text to correct</label>
           <textarea
             id="editor-input"
             class="editor-input"
@@ -46,7 +67,7 @@
           ></textarea>
 
           <div class="editor-bar">
-            <span class="editor-hint" id="editor-hint"></span>
+            <span class="editor-hint" id="editor-hint" role="status" aria-live="polite"></span>
             <div class="editor-buttons">
               <button class="btn ghost" id="editor-clear" type="button">Clear</button>
               <button class="btn primary" id="editor-correct" type="button">Correct</button>
@@ -55,7 +76,7 @@
 
           <div class="result" id="editor-result" hidden>
             <div class="result-head">
-              <span class="result-count" id="result-count"></span>
+              <span class="result-count" id="result-count" role="status" aria-live="polite"></span>
               <div class="result-actions">
                 <button class="btn ghost small" id="editor-use" type="button" hidden>Use ↑</button>
                 <button class="btn primary small" id="editor-copy" type="button">Copy</button>
@@ -67,13 +88,28 @@
       </section>
 
       <!-- ===== Controls ===== -->
-      <section class="panel" id="panel-controls" role="tabpanel" hidden>
+      <section
+        class="panel"
+        id="panel-controls"
+        role="tabpanel"
+        aria-labelledby="tab-controls"
+        hidden
+      >
         <div class="card status" id="status-card">
           <div class="status-row">
             <span class="dot" id="dot"></span>
             <span class="status-text" id="status-text">Checking…</span>
           </div>
-          <div class="progress" id="progress-wrap" hidden>
+          <div
+            class="progress"
+            id="progress-wrap"
+            role="progressbar"
+            aria-label="Model loading progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+            hidden
+          >
             <div class="bar" id="bar"></div>
           </div>
           <div class="meta" id="meta"></div>
@@ -97,13 +133,19 @@
               <button class="engine-badge" id="engine-badge" type="button" hidden></button>
             </div>
             <div class="segmented" id="engine-seg" role="radiogroup" aria-label="AI engine">
-              <button class="seg" data-backend="auto" type="button" role="radio">
+              <button class="seg" data-backend="auto" type="button" role="radio" tabindex="0">
                 <span class="seg-emoji" aria-hidden="true">✨</span>Automatic
               </button>
-              <button class="seg" data-backend="prompt" type="button" role="radio">
+              <button class="seg" data-backend="prompt" type="button" role="radio" tabindex="-1">
                 <span class="seg-emoji" aria-hidden="true">⚡</span>Chrome&nbsp;AI
               </button>
-              <button class="seg" data-backend="transformers" type="button" role="radio">
+              <button
+                class="seg"
+                data-backend="transformers"
+                type="button"
+                role="radio"
+                tabindex="-1"
+              >
                 <span class="seg-emoji" aria-hidden="true">💻</span>Local
               </button>
             </div>

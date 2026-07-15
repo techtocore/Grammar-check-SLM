@@ -10,6 +10,7 @@ function cacheStorage(): CacheStorage | null {
 
 /** True if the given model's weights appear to be present in the cache. */
 export async function isModelCached(modelId: string): Promise<boolean> {
+  if (!modelId.trim()) return false;
   const store = cacheStorage();
   if (!store) return false;
   try {
@@ -43,18 +44,15 @@ export async function listCachedModels(modelIds: string[]): Promise<Record<strin
 
 /** Deletes all cached files for a model. Returns the number of entries removed. */
 export async function deleteModelCache(modelId: string): Promise<number> {
+  if (!modelId.trim()) return 0;
   const store = cacheStorage();
   if (!store) return 0;
-  try {
-    const cache = await store.open(CACHE_NAME);
-    const keys = await cache.keys();
-    const needle = `/${modelId}/`;
-    let deleted = 0;
-    for (const req of keys) {
-      if (req.url.includes(needle) && (await cache.delete(req))) deleted++;
-    }
-    return deleted;
-  } catch {
-    return 0;
+  const cache = await store.open(CACHE_NAME);
+  const keys = await cache.keys();
+  const needle = `/${modelId}/`;
+  let deleted = 0;
+  for (const req of keys) {
+    if (req.url.includes(needle) && (await cache.delete(req))) deleted++;
   }
+  return deleted;
 }

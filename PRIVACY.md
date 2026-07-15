@@ -1,6 +1,6 @@
 # Privacy Policy — Grammar Check SLM
 
-**Last updated: July 8, 2026**
+**Last updated: July 12, 2026**
 
 Grammar Check SLM ("the extension") is a privacy-first browser extension that
 checks and corrects grammar, spelling, and punctuation **entirely on your own
@@ -29,9 +29,10 @@ produce corrections. It is:
 
 - **Never** sent to the developer.
 - **Never** sent to any third-party server for correction.
-- **Never** stored persistently. A short-lived, in-memory cache of recent
-  results is kept only to avoid re-checking unchanged sentences and is discarded
-  when the page or worker is torn down.
+- **Never** stored persistently. A bounded in-memory cache of recent results is
+  kept only to avoid re-checking unchanged sentences. It can remain while the
+  offscreen model runner is active and is cleared when the runner is disabled,
+  reconfigured, closed, or the browser session ends.
 
 ### Settings
 
@@ -49,9 +50,12 @@ downloads model files only — **no text you are editing and no personal
 information is included** in it. Chrome's built-in AI (Gemini Nano) is provided
 by your browser and requires no download from the extension.
 
-Hugging Face's handling of the network request (e.g., IP address and standard
-web-server logs inherent to any file download) is governed by Hugging Face's own
-privacy policy: <https://huggingface.co/privacy>.
+As with any file download, the model host receives standard connection metadata
+such as your IP address and browser user agent. It does not receive text you are
+editing. Hugging Face's handling of that request is governed by its privacy
+policy: <https://huggingface.co/privacy>. Chrome may separately download and
+manage Gemini Nano when you choose its one-time setup; that download is handled
+by the browser, not by this extension.
 
 ### Clipboard
 

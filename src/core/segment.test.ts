@@ -25,6 +25,27 @@ describe('segmentSentences', () => {
     expect(sentences[0]!.text).toBe('this is one line');
   });
 
+  it('falls back safely for a malformed locale', () => {
+    expect(segmentSentences('This still works.', 'not_a_locale')).toEqual([
+      { text: 'This still works.', start: 0, end: 17 },
+    ]);
+  });
+
+  it('retains unterminated lines when Intl.Segmenter is unavailable', () => {
+    const original = Intl.Segmenter;
+    Object.defineProperty(Intl, 'Segmenter', { configurable: true, value: undefined });
+    try {
+      const text = 'First line\nSecond line';
+      const sentences = segmentSentences(text);
+      expect(sentences.map((sentence) => sentence.text)).toEqual(['First line', 'Second line']);
+      for (const sentence of sentences) {
+        expect(text.slice(sentence.start, sentence.end)).toBe(sentence.text);
+      }
+    } finally {
+      Object.defineProperty(Intl, 'Segmenter', { configurable: true, value: original });
+    }
+  });
+
   it('preserves offsets for every sentence in multi-sentence text', () => {
     const text = 'First one! Second two? Third three.';
     const sentences = segmentSentences(text);
@@ -53,5 +74,43 @@ describe('splitLongSentence', () => {
       expect(full.slice(c.start, c.end)).toBe(c.text); // offsets map back exactly
     }
     expect(chunks.map((c) => c.text).join(' ')).toBe(words); // no words lost
+  });
+
+  it('hard-splits an oversized unspaced token', () => {
+    const text = 'a'.repeat(321);
+    const sentence = { text, start: 0, end: text.length };
+    const chunks = splitLongSentence(sentence, 320);
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks.every((chunk) => chunk.text.length <= 320)).toBe(true);
+    expect(chunks.map((chunk) => chunk.text).join('')).toBe(text);
+  });
+
+  it('splits long CJK text and keeps surrogate pairs intact', () => {
+    const text = `${'界'.repeat(319)}😀${'語'.repeat(321)}`;
+    const sentence = { text, start: 7, end: 7 + text.length };
+    const full = `${' '.repeat(7)}${text}`;
+    const chunks = splitLongSentence(sentence, 320);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.text.length <= 320)).toBe(true);
+    expect(chunks.map((chunk) => chunk.text).join('')).toBe(text);
+    expect(chunks.every((chunk) => full.slice(chunk.start, chunk.end) === chunk.text)).toBe(true);
+    expect(chunks.every((chunk) => !/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/.test(chunk.text))).toBe(
+      true,
+    );
+  });
+
+  it('rejects a non-positive maximum length', () => {
+    expect(() => splitLongSentence({ text: 'long', start: 0, end: 4 }, 0)).toThrow(RangeError);
+  });
+
+  it('keeps a grapheme intact when it exceeds the maximum length', () => {
+    const text = '😀x';
+    const chunks = splitLongSentence({ text, start: 0, end: text.length }, 1);
+    expect(chunks.map((chunk) => chunk.text)).toEqual(['😀', 'x']);
+    expect(chunks.every((chunk) => !/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/.test(chunk.text))).toBe(
+      true,
+    );
   });
 });

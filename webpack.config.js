@@ -34,6 +34,22 @@ export default (_env, argv) => {
     module: {
       rules: [
         {
+          // Transformers.js wraps import.meta in Object() inside a Node-only
+          // branch. Webpack serializes that object with the absolute source
+          // path even in browser builds, making otherwise identical releases
+          // differ by checkout directory. The loader asserts the exact upstream
+          // expression before replacing its unused browser value.
+          test: /@huggingface[\\/]transformers[\\/]dist[\\/]transformers\.web\.js$/,
+          use: path.resolve(__dirname, 'scripts/strip-transformers-node-import-meta.cjs'),
+        },
+        {
+          // ONNX Runtime also reads import.meta.url as generic module metadata.
+          // Preserve its `new URL(..., import.meta.url)` worker/WASM expressions
+          // for Webpack, but keep dead fallback metadata checkout-independent.
+          test: /onnxruntime-web[\\/]dist[\\/]ort\.webgpu\.bundle\.min\.mjs$/,
+          use: path.resolve(__dirname, 'scripts/strip-onnx-build-path.cjs'),
+        },
+        {
           test: /\.ts$/,
           use: {
             loader: 'ts-loader',
@@ -92,20 +108,34 @@ export default (_env, argv) => {
           { from: 'src/popup/popup.css', to: 'popup.css' },
           { from: 'src/options/options.css', to: 'options.css' },
           { from: 'src/content/content.css', to: 'content.css' },
-          // Bundle the ONNX Runtime WASM/WebGPU runtime variants locally so
-          // inference works under the extension CSP and offline after the first
-          // model download. Copy the WHOLE `ort-wasm-simd-threaded*` set (plain,
-          // jsep, asyncify, jspi) rather than a hand-picked list: ORT chooses a
-          // variant at runtime by feature detection, and the names change across
-          // onnxruntime-web releases — a fixed list silently breaks on upgrade
-          // with "Failed to fetch dynamically imported module .../ort/...".
+          // The locked ONNX Runtime bundle references the plain pair on Safari
+          // and the asyncify pair elsewhere. `scripts/verify-build.mjs` scans all
+          // emitted code and fails if an upgrade introduces another filename.
           {
-            from: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded*.wasm',
+            from: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.{wasm,mjs}',
             to: 'ort/[name][ext]',
           },
           {
-            from: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded*.mjs',
+            from: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.{wasm,mjs}',
             to: 'ort/[name][ext]',
+          },
+          { from: 'LICENSE', to: 'LICENSE.txt' },
+          { from: 'THIRD_PARTY_NOTICES.txt', to: 'THIRD_PARTY_NOTICES.txt' },
+          {
+            from: 'node_modules/@huggingface/transformers/LICENSE',
+            to: 'licenses/APACHE-2.0.txt',
+          },
+          {
+            from: 'node_modules/@huggingface/jinja/LICENSE',
+            to: 'licenses/JINJA-MIT.txt',
+          },
+          {
+            from: 'node_modules/platform/LICENSE',
+            to: 'licenses/PLATFORM-MIT.txt',
+          },
+          {
+            from: 'node_modules/protobufjs/LICENSE',
+            to: 'licenses/PROTOBUFJS-BSD-3-CLAUSE.txt',
           },
         ],
       }),

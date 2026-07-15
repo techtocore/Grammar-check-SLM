@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tokenize } from './tokenize';
+import { countWords, tokenize, tokenizeWords } from './tokenize';
 
 describe('tokenize', () => {
   it('returns exact offsets for each word', () => {
@@ -28,5 +28,13 @@ describe('tokenize', () => {
   it('returns an empty array for blank input', () => {
     expect(tokenize('   ')).toEqual([]);
     expect(tokenize('')).toEqual([]);
+  });
+
+  it('counts words in languages that do not use spaces', () => {
+    const text = '私は猫が好きです';
+    expect(countWords(text, 'ja')).toBeGreaterThanOrEqual(3);
+    for (const token of tokenizeWords(text, 'ja')) {
+      expect(text.slice(token.start, token.end)).toBe(token.text);
+    }
   });
 });

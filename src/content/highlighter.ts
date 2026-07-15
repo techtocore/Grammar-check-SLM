@@ -6,6 +6,7 @@
 const HIGHLIGHT_NAME = 'grammar-slm';
 
 interface HighlightLike {
+  type?: 'highlight' | 'spelling-error' | 'grammar-error';
   add(range: Range): void;
   delete(range: Range): boolean;
   clear(): void;
@@ -51,6 +52,11 @@ function getSharedHighlight(): HighlightLike | null {
   if (!sharedHighlight) {
     ensurePageHighlightStyle();
     sharedHighlight = api.create();
+    try {
+      sharedHighlight.type = 'grammar-error';
+    } catch {
+      /* Older Highlight implementations expose no writable type. */
+    }
     api.registry.set(HIGHLIGHT_NAME, sharedHighlight);
   }
   return sharedHighlight;

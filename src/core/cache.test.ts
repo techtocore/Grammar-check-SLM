@@ -37,4 +37,19 @@ describe('LRUCache', () => {
     cache.clear();
     expect(cache.size).toBe(0);
   });
+
+  it('evicts an undefined key without exceeding capacity', () => {
+    const cache = new LRUCache<string | undefined, number>(1);
+    cache.set(undefined, 1);
+    cache.set('next', 2);
+    expect(cache.size).toBe(1);
+    expect(cache.has(undefined)).toBe(false);
+    expect(cache.get('next')).toBe(2);
+  });
+
+  it('stores no entries when capacity is zero', () => {
+    const cache = new LRUCache<string, number>(0);
+    cache.set('key', 1);
+    expect(cache.size).toBe(0);
+  });
 });

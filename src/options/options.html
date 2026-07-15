@@ -62,10 +62,19 @@
       <section class="card" id="ai-card" hidden>
         <div class="models-head">
           <h2>Chrome built-in AI</h2>
-          <div class="model-status" id="ai-status"></div>
+          <div class="model-status" id="ai-status" role="status" aria-live="polite"></div>
         </div>
         <p class="hint" id="ai-hint"></p>
-        <div class="mini-progress" id="ai-progress" hidden>
+        <div
+          class="mini-progress"
+          id="ai-progress"
+          role="progressbar"
+          aria-label="Chrome AI download progress"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+          hidden
+        >
           <div class="mini-bar" id="ai-bar"></div>
         </div>
         <button class="model-btn download" id="ai-setup" type="button" hidden>
@@ -76,7 +85,7 @@
       <section class="card">
         <div class="models-head">
           <h2>Models</h2>
-          <div class="model-status" id="model-status"></div>
+          <div class="model-status" id="model-status" role="status" aria-live="polite"></div>
         </div>
         <div class="models-list" id="models-list"></div>
       </section>
@@ -124,7 +133,7 @@
       </section>
 
       <footer class="footer">
-        <span class="saved" id="saved" hidden>✓ Saved</span>
+        <span class="saved" id="saved" role="status" aria-live="polite" hidden>✓ Saved</span>
         <a
           href="https://github.com/techtocore/Grammar-check-SLM"
           target="_blank"

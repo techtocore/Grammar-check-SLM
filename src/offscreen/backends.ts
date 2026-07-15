@@ -29,6 +29,7 @@ type Device = ModelStatus['device'];
 
 export interface LoadedBackend {
   label: string;
+  modelId: string;
   device: Device;
 }
 
@@ -76,6 +77,7 @@ async function detectWebGPU(): Promise<boolean> {
 
 function deviceCandidates(pref: RunnerConfig['device'], hasWebGPU: boolean): ('webgpu' | 'wasm')[] {
   if (pref === 'wasm') return ['wasm'];
+  if (pref === 'webgpu') return ['webgpu'];
   return hasWebGPU ? ['webgpu', 'wasm'] : ['wasm'];
 }
 
@@ -97,6 +99,25 @@ export function isMemoryError(error: unknown): boolean {
     text.includes('array buffer') ||
     text.includes('oom') ||
     text.includes('aborted')
+  );
+}
+
+const DTYPE_MEMORY_RANK: Record<DType, number> = {
+  auto: 100,
+  fp32: 32,
+  fp16: 16,
+  q8: 8,
+  q4f16: 5,
+  q4: 4,
+};
+
+function hasSmallerCandidate(candidates: readonly DType[], index: number): boolean {
+  const current = candidates[index];
+  return (
+    current !== undefined &&
+    candidates
+      .slice(index + 1)
+      .some((candidate) => DTYPE_MEMORY_RANK[candidate] < DTYPE_MEMORY_RANK[current])
   );
 }
 
@@ -167,12 +188,16 @@ export class TransformersBackend implements Backend {
 
   async load(config: RunnerConfig, onProgress: ProgressFn): Promise<LoadedBackend> {
     const hasWebGPU = await detectWebGPU();
+    if (config.device === 'webgpu' && !hasWebGPU) {
+      throw new Error('WebGPU is not available on this device.');
+    }
     const preset = resolvePreset(config.model, hasWebGPU);
     const expectedBytes = preset.approxDownloadMB * 1024 * 1024;
     let lastError: unknown = new Error('No backend available');
 
     for (const device of deviceCandidates(config.device, hasWebGPU)) {
-      for (const dtype of dtypeCandidates(preset, device)) {
+      const dtypes = dtypeCandidates(preset, device);
+      for (const [index, dtype] of dtypes.entries()) {
         const aggregator = new ProgressAggregator(expectedBytes);
         try {
           const generator = await buildPipeline(preset, device, dtype, (raw) => {
@@ -182,12 +207,11 @@ export class TransformersBackend implements Backend {
           });
           this.generator = generator;
           this.preset = preset;
-          return { label: preset.label, device };
+          return { label: preset.label, modelId: preset.modelId, device };
         } catch (error) {
           lastError = error;
           log.warn(`Load failed on ${device}/${dtype}.`, error);
-          // A different quantization of the same model won't fix OOM; skip to next backend.
-          if (isMemoryError(error)) break;
+          if (isMemoryError(error) && !hasSmallerCandidate(dtypes, index)) break;
         }
       }
     }
@@ -236,12 +260,17 @@ export class TransformersBackend implements Backend {
 export async function downloadTransformersModel(
   preset: ModelPreset,
   onProgress: (progress: number) => void,
+  devicePreference: RunnerConfig['device'] = 'auto',
 ): Promise<void> {
   const hasWebGPU = await detectWebGPU();
+  if (devicePreference === 'webgpu' && !hasWebGPU) {
+    throw new Error('WebGPU is not available on this device.');
+  }
   const expectedBytes = preset.approxDownloadMB * 1024 * 1024;
   let lastError: unknown = new Error('No backend available');
-  for (const device of deviceCandidates('auto', hasWebGPU)) {
-    for (const dtype of dtypeCandidates(preset, device)) {
+  for (const device of deviceCandidates(devicePreference, hasWebGPU)) {
+    const dtypes = dtypeCandidates(preset, device);
+    for (const [index, dtype] of dtypes.entries()) {
       const aggregator = new ProgressAggregator(expectedBytes);
       try {
         const generator = await buildPipeline(preset, device, dtype, (raw) => {
@@ -253,7 +282,7 @@ export async function downloadTransformersModel(
       } catch (error) {
         lastError = error;
         log.warn(`Download failed on ${device}/${dtype}.`, error);
-        if (isMemoryError(error)) break;
+        if (isMemoryError(error) && !hasSmallerCandidate(dtypes, index)) break;
       }
     }
   }
@@ -304,7 +333,11 @@ export class PromptApiBackend implements Backend {
         });
       },
     });
-    return { label: 'Chrome built-in AI', device: 'built-in' };
+    return {
+      label: 'Chrome built-in AI',
+      modelId: 'Chrome built-in AI',
+      device: 'built-in',
+    };
   }
 
   async generate(sentence: string): Promise<string> {

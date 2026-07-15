@@ -26,11 +26,12 @@
     "slm"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19"
   },
   "scripts": {
-    "build": "webpack --mode production",
+    "build": "webpack --mode production && npm run verify:build",
     "dev": "webpack --mode development --watch",
+    "verify:build": "node scripts/verify-build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -38,21 +39,21 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run typecheck && npm run lint && npm run test && npm run build"
+    "check": "npm run format:check && npm run typecheck && npm run lint && npm run test && npm run build"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/chrome": "^0.2.2",
     "@types/node": "^26.1.1",
     "copy-webpack-plugin": "^14.0.0",
-    "eslint": "^10.6.0",
+    "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
     "html-webpack-plugin": "^5.6.7",
     "jsdom": "^29.1.1",
-    "prettier": "^3.9.4",
+    "prettier": "^3.9.5",
     "ts-loader": "^9.6.2",
     "typescript": "~6.0.3",
-    "typescript-eslint": "^8.63.0",
+    "typescript-eslint": "^8.64.0",
     "vitest": "^4.1.10",
     "webpack": "^5.108.4",
     "webpack-cli": "^7.2.1"

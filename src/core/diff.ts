@@ -1,5 +1,5 @@
 import type { Edit } from './types';
-import { tokenize } from './tokenize';
+import { tokenize, tokenizeWords } from './tokenize';
 
 interface Op {
   type: 'equal' | 'delete' | 'insert';
@@ -62,9 +62,28 @@ function lcsOps(a: readonly string[], b: readonly string[]): Op[] {
  * - Insertions are represented as zero-width edits anchored at a word boundary,
  *   which keeps them non-overlapping and safe to apply.
  */
-export function diffWords(original: string, corrected: string): Edit[] {
-  const aTokens = tokenize(original);
-  const bTokens = tokenize(corrected);
+export function diffWords(original: string, corrected: string, locale?: string): Edit[] {
+  const segmented =
+    locale !== undefined &&
+    typeof Intl.Segmenter === 'function' &&
+    (tokenizeWords(original, locale).length > tokenize(original).length ||
+      tokenizeWords(corrected, locale).length > tokenize(corrected).length);
+  const tokensForDiff = (text: string): ReturnType<typeof tokenize> => {
+    if (!segmented) return tokenize(text);
+    let segmenter: Intl.Segmenter;
+    try {
+      segmenter = new Intl.Segmenter(locale.replaceAll('_', '-'), { granularity: 'word' });
+    } catch {
+      segmenter = new Intl.Segmenter('en', { granularity: 'word' });
+    }
+    return [...segmenter.segment(text)].map((part) => ({
+      text: part.segment,
+      start: part.index,
+      end: part.index + part.segment.length,
+    }));
+  };
+  const aTokens = tokensForDiff(original);
+  const bTokens = tokensForDiff(corrected);
   const ops = lcsOps(
     aTokens.map((t) => t.text),
     bTokens.map((t) => t.text),
@@ -76,7 +95,7 @@ export function diffWords(original: string, corrected: string): Edit[] {
   let prevEqualA: number | null = null;
 
   const joinCorrected = (indices: number[]): string =>
-    indices.map((k) => bTokens[k]!.text).join(' ');
+    indices.map((k) => bTokens[k]!.text).join(segmented ? '' : ' ');
 
   const flush = (nextEqualA: number | null): void => {
     if (delBuf.length === 0 && insBuf.length === 0) return;
@@ -125,7 +144,7 @@ export function diffWords(original: string, corrected: string): Edit[] {
           start: anchor.start,
           end: anchor.start,
           original: '',
-          suggestion: `${insertText} `,
+          suggestion: segmented ? insertText : `${insertText} `,
         });
       } else if (prevEqualA !== null) {
         const anchor = aTokens[prevEqualA]!;
@@ -134,7 +153,7 @@ export function diffWords(original: string, corrected: string): Edit[] {
           start: anchor.end,
           end: anchor.end,
           original: '',
-          suggestion: ` ${insertText}`,
+          suggestion: segmented ? insertText : ` ${insertText}`,
         });
       } else {
         edits.push({

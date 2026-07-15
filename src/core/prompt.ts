@@ -51,7 +51,11 @@ export function buildInitialPrompts(): ChatMessage[] {
 }
 
 const PREFIX_RE =
-  /^\s*(?:corrected(?:\s+(?:sentence|text|version))?|output|answer|result|correction|here(?:'s| is)[^:]*)\s*[:-]\s*/i;
+  /^\s*(?:corrected(?:\s+(?:sentence|text|version))?|output|answer|result|correction|here(?:'s| is)\s+(?:(?:the|your|a)\s+)?(?:corrected\s+(?:sentence|text|version)|answer|result|correction))\s*[:-]\s*/i;
+
+const EXPLANATION_RE = /^\s*(?:explanation|reasoning|changes?|notes?|why)\s*:/i;
+const UNLABELLED_EXPLANATION_RE =
+  /^\s*(?:(?:i|we)(?:'ve| have)?\s+(?:fixed|corrected|changed|adjusted|updated|removed|added)|this\s+(?:fixes|corrects|changes)|the\s+(?:verb|grammar|spelling|punctuation)\s+(?:was|is|has))/i;
 
 const QUOTE_PAIRS: Record<string, string> = {
   '"': '"',
@@ -62,39 +66,57 @@ const QUOTE_PAIRS: Record<string, string> = {
   '`': '`',
 };
 
-function stripWrappingQuotes(input: string): string {
+function wrappingQuote(input: string): string | undefined {
+  const current = input.trim();
+  const first = current[0];
+  const last = current[current.length - 1];
+  return first && last && current.length >= 2 && QUOTE_PAIRS[first] === last ? first : undefined;
+}
+
+function stripWrappingQuotes(input: string, source: string): string {
   let current = input.trim();
   let previous = '';
   while (current !== previous) {
     previous = current;
-    const first = current[0];
-    const last = current[current.length - 1];
-    if (first && last && current.length >= 2 && QUOTE_PAIRS[first] === last) {
+    const quote = wrappingQuote(current);
+    if (quote && wrappingQuote(source) !== quote) {
       current = current.slice(1, -1).trim();
     }
   }
   return current;
 }
 
-function stripThinking(input: string): string {
-  // Remove well-formed <think>…</think> blocks (Qwen3 reasoning traces).
-  let out = input.replace(/<think>[\s\S]*?<\/think>/gi, '');
-  // If a stray closing tag remains, discard everything up to and including it.
-  const closeIdx = out.toLowerCase().lastIndexOf('</think>');
+function stripLeadingThinking(input: string, source: string): string {
+  if (/<\/?think\b/i.test(source)) return input;
+
+  // Qwen reasoning traces precede the answer. Never remove matching text from
+  // inside a user's sentence.
+  let out = input.replace(/^\s*(?:<think>[\s\S]*?<\/think>\s*)+/i, '');
+  const closeIdx = out.toLowerCase().indexOf('</think>');
   if (closeIdx !== -1) {
     out = out.slice(closeIdx + '</think>'.length);
   }
   return out;
 }
 
-/** First non-empty line that still has content after stripping a label prefix. */
-function firstMeaningfulLine(text: string): string {
+/** Joins wrapped output lines while dropping explicitly labelled commentary. */
+function correctedTextLines(text: string, source: string): string {
   const lines = text.split(/\r?\n/);
+  const parts: string[] = [];
   for (const line of lines) {
-    const stripped = line.replace(PREFIX_RE, '').trim();
-    if (stripped) return stripped;
+    if (parts.length > 0 && (EXPLANATION_RE.test(line) || UNLABELLED_EXPLANATION_RE.test(line))) {
+      break;
+    }
+
+    let stripped = line.trim();
+    if (parts.length === 0) {
+      const rawPrefix = stripped.match(PREFIX_RE)?.[0]?.trim().toLocaleLowerCase();
+      const sourcePrefix = source.trim().match(PREFIX_RE)?.[0]?.trim().toLocaleLowerCase();
+      if (rawPrefix !== sourcePrefix) stripped = stripped.replace(PREFIX_RE, '').trim();
+    }
+    if (stripped) parts.push(stripped);
   }
-  return text.trim();
+  return parts.join(' ');
 }
 
 /**
@@ -103,9 +125,10 @@ function firstMeaningfulLine(text: string): string {
  * wrapping quotes. Falls back to the source sentence when nothing usable remains.
  */
 export function cleanModelOutput(raw: string, source: string): string {
-  let out = firstMeaningfulLine(stripThinking(raw));
-  out = out.replace(PREFIX_RE, '');
-  out = stripWrappingQuotes(out);
+  if (raw.trim() === source.trim()) return source.trim();
+
+  let out = correctedTextLines(stripLeadingThinking(raw, source), source);
+  out = stripWrappingQuotes(out, source);
   out = out.replace(/\s+/g, ' ').trim();
   return out.length > 0 ? out : source.trim();
 }

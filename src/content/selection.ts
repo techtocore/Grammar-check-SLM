@@ -1,10 +1,16 @@
-import { isContentMessage, type ContentMessage } from '../shared/messages';
+import { isBackgroundSender, isContentMessage, type ContentMessage } from '../shared/messages';
 import { createLogger } from '../shared/logger';
 
 const log = createLogger('content');
 
 type TextField = HTMLInputElement | HTMLTextAreaElement;
 type CorrectResult = Extract<ContentMessage, { type: 'gc-correct-result' }>;
+
+type SelectionSnapshot =
+  | { kind: 'field'; field: TextField; start: number; end: number; value: string }
+  | { kind: 'range'; range: Range; host: HTMLElement | null; hostText: string | null };
+
+const pending = new Map<string, SelectionSnapshot | null>();
 
 let toast: HTMLDivElement | null = null;
 let hideTimer: number | null = null;
@@ -108,56 +114,114 @@ function setNativeValue(field: TextField, value: string): void {
   }
 }
 
+function deepActiveElement(): Element | null {
+  let active: Element | null = document.activeElement;
+  while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+  return active;
+}
+
+function editableHost(node: Node): HTMLElement | null {
+  const element = node instanceof Element ? node : node.parentElement;
+  const host = element?.closest<HTMLElement>('[contenteditable]') ?? null;
+  return host?.isContentEditable ? host : null;
+}
+
+function captureSelection(original: string): SelectionSnapshot | null {
+  const active = deepActiveElement();
+  if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+    const start = active.selectionStart;
+    const end = active.selectionEnd;
+    if (
+      start !== null &&
+      end !== null &&
+      start !== end &&
+      active.value.slice(start, end).trim() === original.trim()
+    ) {
+      return { kind: 'field', field: active, start, end, value: active.value };
+    }
+  }
+
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+  const range = selection.getRangeAt(0).cloneRange();
+  if (range.toString().trim() !== original.trim()) return null;
+  const host = editableHost(range.commonAncestorContainer);
+  return { kind: 'range', range, host, hostText: host?.textContent ?? null };
+}
+
 /**
  * Replaces the current selection with `corrected`. Returns 'replaced' when it
  * landed in an editable field, 'noneditable' for read-only text (copy instead),
  * or 'stale' if the selection no longer matches what was corrected.
  */
 function replaceSelection(
+  snapshot: SelectionSnapshot | null,
   corrected: string,
   original: string,
 ): 'replaced' | 'noneditable' | 'stale' {
-  const active = document.activeElement;
-  if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
-    const start = active.selectionStart;
-    const end = active.selectionEnd;
-    if (start !== null && end !== null && start !== end) {
-      if (active.value.slice(start, end).trim() !== original.trim()) return 'stale';
-      const next = active.value.slice(0, start) + corrected + active.value.slice(end);
-      setNativeValue(active, next);
-      try {
-        active.setSelectionRange(start, start + corrected.length);
-      } catch {
-        /* some input types disallow selection */
-      }
-      active.dispatchEvent(new Event('input', { bubbles: true }));
-      active.dispatchEvent(new Event('change', { bubbles: true }));
-      return 'replaced';
+  if (!snapshot) return 'stale';
+
+  if (snapshot.kind === 'field') {
+    const { field, start, end, value } = snapshot;
+    if (!field.isConnected || field.value !== value) return 'stale';
+    if (field.value.slice(start, end).trim() !== original.trim()) return 'stale';
+    const next = field.value.slice(0, start) + corrected + field.value.slice(end);
+    setNativeValue(field, next);
+    try {
+      field.setSelectionRange(start, start + corrected.length);
+    } catch {
+      /* some input types disallow selection */
     }
+    field.dispatchEvent(
+      new InputEvent('input', {
+        bubbles: true,
+        composed: true,
+        inputType: 'insertReplacementText',
+        data: corrected,
+      }),
+    );
+    field.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    return 'replaced';
   }
+
+  const { range, host, hostText } = snapshot;
+  if (!range.startContainer.isConnected || !range.endContainer.isConnected) return 'stale';
+  if (range.toString().trim() !== original.trim()) return 'stale';
+  if (!host) return 'noneditable';
+  if (!host.isConnected || !host.isContentEditable || host.textContent !== hostText) return 'stale';
 
   const selection = window.getSelection();
-  if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
-    if (selection.toString().trim() !== original.trim()) return 'stale';
-    const range = selection.getRangeAt(0);
-    const node = range.commonAncestorContainer;
-    const element = node instanceof Element ? node : node.parentElement;
-    const host = element?.closest<HTMLElement>('[contenteditable=""],[contenteditable="true"]');
-    if (host?.isContentEditable) {
-      range.deleteContents();
-      range.insertNode(document.createTextNode(corrected));
-      selection.collapseToEnd();
-      host.dispatchEvent(new InputEvent('input', { bubbles: true }));
-      return 'replaced';
-    }
-    return 'noneditable';
+  const current = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  const selectionUnchanged =
+    current?.startContainer === range.startContainer &&
+    current.startOffset === range.startOffset &&
+    current.endContainer === range.endContainer &&
+    current.endOffset === range.endOffset;
+  range.deleteContents();
+  const replacement = document.createTextNode(corrected);
+  range.insertNode(replacement);
+  if (selection && selectionUnchanged) {
+    const caret = document.createRange();
+    caret.setStartAfter(replacement);
+    caret.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(caret);
   }
-
-  return 'stale';
+  host.dispatchEvent(
+    new InputEvent('input', {
+      bubbles: true,
+      composed: true,
+      inputType: 'insertReplacementText',
+      data: corrected,
+    }),
+  );
+  return 'replaced';
 }
 
 function handleResult(message: CorrectResult): void {
-  const { corrected, original, error } = message;
+  const { requestId, corrected, original, error } = message;
+  const snapshot = pending.get(requestId) ?? null;
+  pending.delete(requestId);
   if (error) {
     log.warn('Selection correction failed:', error);
     showMessageToast(`⚠ ${error}`, 3400);
@@ -167,17 +231,21 @@ function handleResult(message: CorrectResult): void {
     showMessageToast('✓ Already looks good', 2000);
     return;
   }
-  const outcome = replaceSelection(corrected, original);
+  const outcome = replaceSelection(snapshot, corrected, original);
   if (outcome === 'replaced') showMessageToast('✓ Grammar corrected', 2000);
-  else showCopyToast(corrected);
+  else if (outcome === 'noneditable') showCopyToast(corrected);
+  else showMessageToast('Selection changed. Try again.', 2400);
 }
 
 /** Registers the listener that powers the "Correct grammar of selection" menu. */
 export function initSelectionCorrection(): void {
-  chrome.runtime.onMessage.addListener((message: unknown) => {
+  chrome.runtime.onMessage.addListener((message: unknown, sender) => {
+    if (!isBackgroundSender(sender, chrome.runtime.id)) return undefined;
     if (!isContentMessage(message)) return undefined;
-    if (message.type === 'gc-correcting') showSpinnerToast('Correcting…');
-    else handleResult(message);
+    if (message.type === 'gc-correcting') {
+      pending.set(message.requestId, captureSelection(message.original));
+      showSpinnerToast('Correcting…');
+    } else handleResult(message);
     return undefined;
   });
 }

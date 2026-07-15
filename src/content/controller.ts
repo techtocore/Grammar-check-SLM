@@ -5,12 +5,10 @@ import { newRequestId, sendToBackground, type CheckResult } from '../shared/mess
 import { createLogger } from '../shared/logger';
 import { extensionContextValid, invalidateContext, isContextInvalidationError } from './lifecycle';
 import type { Tooltip } from './tooltip';
+import { fieldKindFor } from './fields/eligibility';
+import { countWords } from '../core/tokenize';
 
 const log = createLogger('content');
-
-function wordCount(text: string): number {
-  return text.trim().match(/\S+/g)?.length ?? 0;
-}
 
 function ignoreKey(correction: Correction): string {
   return `${correction.original}\u0000${correction.suggestion}`;
@@ -60,11 +58,22 @@ export class FieldController {
 
   updateSettings(settings: Settings): void {
     this.settings = settings;
-    this.scheduleCheck(400);
+    this.requestSeq++;
+    if (this.debounceTimer !== null) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    if (this.recheckTimer !== null) {
+      clearTimeout(this.recheckTimer);
+      this.recheckTimer = null;
+    }
+    this.tooltip.hide();
+    if (this.corrections.length > 0) this.setCorrections([]);
   }
 
   destroy(): void {
     this.destroyed = true;
+    this.tooltip.hide();
     if (this.debounceTimer !== null) clearTimeout(this.debounceTimer);
     if (this.recheckTimer !== null) clearTimeout(this.recheckTimer);
     if (this.pointerRaf !== 0) cancelAnimationFrame(this.pointerRaf);
@@ -81,6 +90,16 @@ export class FieldController {
 
   private async check(): Promise<void> {
     if (this.destroyed) return;
+    // Revalidate before reading the value. Attribute changes inside a shadow
+    // root are invisible to the document observer, and a text field may have
+    // become password/readonly since it was attached.
+    if (
+      !this.adapter.element.isConnected ||
+      fieldKindFor(this.adapter.element, this.settings) !== this.adapter.kind
+    ) {
+      this.setCorrections([]);
+      return;
+    }
     // The extension may have been reloaded/updated while this page stayed open,
     // leaving this content script orphaned. Detect that and shut down cleanly
     // instead of repeatedly failing to message a gone service worker.
@@ -89,7 +108,7 @@ export class FieldController {
       return;
     }
     const text = this.adapter.getText();
-    if (wordCount(text) < this.settings.minWords) {
+    if (countWords(text, this.settings.language) < this.settings.minWords) {
       this.setCorrections([]);
       return;
     }
@@ -102,7 +121,6 @@ export class FieldController {
         target: 'background',
         requestId: newRequestId(),
         text,
-        ...(this.origin ? { origin: this.origin } : {}),
       });
     } catch (error) {
       if (isContextInvalidationError(error)) {
@@ -204,6 +222,14 @@ export class FieldController {
   }
 
   private apply(correction: Correction): void {
+    if (
+      !this.adapter.element.isConnected ||
+      fieldKindFor(this.adapter.element, this.settings) !== this.adapter.kind
+    ) {
+      this.tooltip.hide();
+      this.setCorrections([]);
+      return;
+    }
     const ok = this.adapter.applyEdit(
       correction.start,
       correction.end,

@@ -52,7 +52,7 @@ export type BackgroundMessage =
   | { type: 'status'; target: 'background' }
   | { type: 'warmup'; target: 'background' }
   | { type: 'retry'; target: 'background' }
-  | { type: 'check'; target: 'background'; requestId: string; text: string; origin?: string }
+  | { type: 'check'; target: 'background'; requestId: string; text: string }
   | { type: 'correct'; target: 'background'; requestId: string; text: string }
   | { type: 'settings:get'; target: 'background' }
   | { type: 'settings:set'; target: 'background'; patch: Partial<Settings> }
@@ -69,15 +69,21 @@ export type OffscreenMessage =
   | { type: 'reload'; target: 'offscreen' }
   | { type: 'check'; target: 'offscreen'; requestId: string; text: string }
   | { type: 'config'; target: 'offscreen'; config: RunnerConfig }
-  | { type: 'download'; target: 'offscreen'; modelId: string };
+  | {
+      type: 'download';
+      target: 'offscreen';
+      modelId: string;
+      device: DevicePreference;
+    };
 
 // ---- Messages addressed to a page's content script (via chrome.tabs.sendMessage) ----
 
 export type ContentMessage =
-  | { type: 'gc-correcting'; target: 'content' }
+  | { type: 'gc-correcting'; target: 'content'; requestId: string; original: string }
   | {
       type: 'gc-correct-result';
       target: 'content';
+      requestId: string;
       corrected: string;
       original: string;
       error?: string;
@@ -100,12 +106,80 @@ export interface DownloadProgress {
   error?: string;
 }
 
+type SenderContext = 'content' | 'popup' | 'options' | 'offscreen' | 'background' | 'unknown';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasText(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function senderContext(sender: chrome.runtime.MessageSender, extensionId: string): SenderContext {
+  if (sender.id !== extensionId) return 'unknown';
+
+  if (sender.url) {
+    try {
+      const url = new URL(sender.url);
+      if (url.protocol === 'chrome-extension:') {
+        if (url.host !== extensionId) return 'unknown';
+        if (url.pathname === '/popup.html') return 'popup';
+        if (url.pathname === '/options.html') return 'options';
+        if (url.pathname === '/offscreen.html') return 'offscreen';
+        if (url.pathname === '/background.js') return 'background';
+        return 'unknown';
+      }
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  if (sender.tab) return 'content';
+  // Service-worker messages can omit a document URL depending on Chromium.
+  return sender.url ? 'unknown' : 'background';
+}
+
 export function isBackgroundMessage(msg: unknown): msg is BackgroundMessage {
-  return typeof msg === 'object' && msg !== null && 'target' in msg && msg.target === 'background';
+  if (!isRecord(msg) || msg.target !== 'background' || typeof msg.type !== 'string') return false;
+  switch (msg.type) {
+    case 'status':
+    case 'warmup':
+    case 'retry':
+    case 'settings:get':
+    case 'models:list':
+      return true;
+    case 'check':
+    case 'correct':
+      return hasText(msg.requestId) && typeof msg.text === 'string';
+    case 'settings:set':
+      return isRecord(msg.patch);
+    case 'site:enabled':
+      return hasText(msg.origin);
+    case 'models:download':
+    case 'models:delete':
+      return hasText(msg.modelId);
+    default:
+      return false;
+  }
 }
 
 export function isOffscreenMessage(msg: unknown): msg is OffscreenMessage {
-  return typeof msg === 'object' && msg !== null && 'target' in msg && msg.target === 'offscreen';
+  if (!isRecord(msg) || msg.target !== 'offscreen' || typeof msg.type !== 'string') return false;
+  switch (msg.type) {
+    case 'status':
+    case 'warmup':
+    case 'reload':
+      return true;
+    case 'check':
+      return hasText(msg.requestId) && typeof msg.text === 'string';
+    case 'config':
+      return isRecord(msg.config);
+    case 'download':
+      return hasText(msg.modelId) && ['auto', 'webgpu', 'wasm'].includes(String(msg.device));
+    default:
+      return false;
+  }
 }
 
 export function isStatusBroadcast(msg: unknown): msg is StatusBroadcast {
@@ -123,7 +197,50 @@ export function isDownloadProgress(msg: unknown): msg is DownloadProgress {
 }
 
 export function isContentMessage(msg: unknown): msg is ContentMessage {
-  return typeof msg === 'object' && msg !== null && 'target' in msg && msg.target === 'content';
+  if (!isRecord(msg) || msg.target !== 'content' || typeof msg.type !== 'string') return false;
+  if (msg.type === 'gc-correcting') {
+    return hasText(msg.requestId) && typeof msg.original === 'string';
+  }
+  return (
+    msg.type === 'gc-correct-result' &&
+    hasText(msg.requestId) &&
+    typeof msg.corrected === 'string' &&
+    typeof msg.original === 'string' &&
+    (msg.error === undefined || typeof msg.error === 'string')
+  );
+}
+
+/** Whether this sender is allowed to invoke the requested background operation. */
+export function isAuthorizedBackgroundMessage(
+  message: BackgroundMessage,
+  sender: chrome.runtime.MessageSender,
+  extensionId: string,
+): boolean {
+  const context = senderContext(sender, extensionId);
+  if (context === 'content') return message.type === 'check' || message.type === 'warmup';
+  if (context === 'popup') {
+    return !['check', 'models:list', 'models:download', 'models:delete'].includes(message.type);
+  }
+  if (context === 'options') {
+    return !['check', 'correct', 'site:enabled', 'warmup'].includes(message.type);
+  }
+  return false;
+}
+
+/** Whether a runtime message originated in this extension's service worker. */
+export function isBackgroundSender(
+  sender: chrome.runtime.MessageSender,
+  extensionId: string,
+): boolean {
+  return senderContext(sender, extensionId) === 'background';
+}
+
+/** Whether a status/progress broadcast originated in the offscreen runner. */
+export function isOffscreenSender(
+  sender: chrome.runtime.MessageSender,
+  extensionId: string,
+): boolean {
+  return senderContext(sender, extensionId) === 'offscreen';
 }
 
 /** Sends a typed message to the background worker and awaits its response. */

@@ -1,5 +1,6 @@
 import {
   isDownloadProgress,
+  isOffscreenSender,
   isStatusBroadcast,
   sendToBackground,
   type ModelInfo,
@@ -49,6 +50,11 @@ async function save(patch: Partial<Settings>): Promise<void> {
   flashSaved();
   render();
   if ('model' in patch || 'backend' in patch) void refreshModels();
+  activeStatus = await sendToBackground<ModelStatus | null>({
+    type: 'status',
+    target: 'background',
+  });
+  renderModelStatus();
 }
 
 // ---- Model manager ----
@@ -134,6 +140,11 @@ function renderModels(): void {
     if (dl?.state === 'downloading') {
       const wrap = document.createElement('div');
       wrap.className = 'mini-progress';
+      wrap.setAttribute('role', 'progressbar');
+      wrap.setAttribute('aria-label', `${model.label} download progress`);
+      wrap.setAttribute('aria-valuemin', '0');
+      wrap.setAttribute('aria-valuemax', '100');
+      wrap.setAttribute('aria-valuenow', String(dl.progress));
       const bar = document.createElement('div');
       bar.className = 'mini-bar';
       bar.style.width = `${dl.progress}%`;
@@ -146,11 +157,23 @@ function renderModels(): void {
       if (model.cached) {
         actions.append(
           button('Delete', 'delete', () => {
-            void sendToBackground({
+            void sendToBackground<{ ok: boolean }>({
               type: 'models:delete',
               target: 'background',
               modelId: model.modelId,
-            }).then(() => refreshModels());
+            })
+              .then((response) => {
+                if (response.ok) return refreshModels();
+                throw new Error('The downloaded model could not be deleted.');
+              })
+              .catch((error: unknown) => {
+                downloads.set(model.modelId, {
+                  progress: 0,
+                  state: 'error',
+                  error: error instanceof Error ? error.message : String(error),
+                });
+                renderModels();
+              });
           }),
         );
       } else {
@@ -158,11 +181,22 @@ function renderModels(): void {
           button('Download', 'download', () => {
             downloads.set(model.modelId, { progress: 0, state: 'downloading' });
             renderModels();
-            void sendToBackground({
+            void sendToBackground<{ ok: boolean }>({
               type: 'models:download',
               target: 'background',
               modelId: model.modelId,
-            });
+            })
+              .then((response) => {
+                if (!response.ok) throw new Error('The model download could not be started.');
+              })
+              .catch((error: unknown) => {
+                downloads.set(model.modelId, {
+                  progress: 0,
+                  state: 'error',
+                  error: error instanceof Error ? error.message : String(error),
+                });
+                renderModels();
+              });
           }),
         );
       }
@@ -245,14 +279,20 @@ function initBuiltinAi(): void {
           monitor(monitor) {
             monitor.addEventListener('downloadprogress', (event) => {
               bar.style.width = `${Math.round((event as ProgressEvent).loaded * 100)}%`;
+              progressWrap.setAttribute(
+                'aria-valuenow',
+                String(Math.round((event as ProgressEvent).loaded * 100)),
+              );
             });
           },
         });
         session.destroy();
         render('available');
       } catch (error) {
+        setPill('Set-up failed', 'error');
         hint.textContent = `Set-up failed: ${error instanceof Error ? error.message : String(error)}`;
-        render(await lm.availability(promptApiLanguageOptions(settings?.language)));
+        progressWrap.hidden = true;
+        setupBtn.hidden = false;
       } finally {
         setupBtn.disabled = false;
       }
@@ -271,10 +311,10 @@ function modelDescription(id: string): string {
 
 function backendDescription(backend: Settings['backend']): string {
   if (backend === 'prompt') {
-    return "Uses Chrome's built-in Gemini Nano — instant and private, with no model download. Requires a supported Chrome build (set it up below).";
+    return "Uses Chrome's built-in Gemini Nano. Chrome may download it during one-time setup. Requires a supported Chrome build.";
   }
   if (backend === 'transformers') {
-    return 'Always runs a local Transformers.js model you download — works in any browser.';
+    return 'Runs a downloaded Transformers.js model locally in supported Chromium browsers.';
   }
   return "Prefers Chrome's built-in AI when available, and falls back to the local model below otherwise.";
 }
@@ -369,7 +409,8 @@ function wire(): void {
 }
 
 function wireBroadcasts(): void {
-  chrome.runtime.onMessage.addListener((message: unknown) => {
+  chrome.runtime.onMessage.addListener((message: unknown, sender) => {
+    if (!isOffscreenSender(sender, chrome.runtime.id)) return;
     if (isStatusBroadcast(message)) {
       activeStatus = message.status;
       renderModelStatus();

@@ -35,6 +35,21 @@ describe('buildDomText', () => {
     const dom = buildDomText(makeRoot('a<br>b'));
     expect(dom.text).toBe('a\nb');
   });
+
+  it('keeps protected tokens as read-only context', () => {
+    const dom = buildDomText(makeRoot('Hello <span contenteditable="false">@alice</span> today'));
+    expect(dom.text).toBe('Hello @alice today');
+    expect(dom.positions.slice(6, 12).every((position) => position?.readonly)).toBe(true);
+  });
+
+  it('excludes non-rendered subtrees', () => {
+    const dom = buildDomText(
+      makeRoot(
+        'Visible<script>secret()</script><style>.hidden{}</style><span hidden>gone</span> text',
+      ),
+    );
+    expect(dom.text).toBe('Visible text');
+  });
 });
 
 describe('resolveRange', () => {
@@ -100,5 +115,38 @@ describe('applyDomEdit', () => {
     const dom = buildDomText(root);
     expect(applyDomEdit(dom, 2, 5, 'XXX', 'have')).toBe(false);
     expect(root.textContent).toBe('I has a cat');
+  });
+
+  it('refuses edits that cross a protected contenteditable token', () => {
+    const root = makeRoot('Hello <span contenteditable="false">@alice</span> today');
+    const dom = buildDomText(root);
+    expect(applyDomEdit(dom, 6, 12, '@alice', '@bob')).toBe(false);
+    expect(root.querySelector('[contenteditable="false"]')?.textContent).toBe('@alice');
+  });
+
+  it('refuses insertions at a protected token boundary', () => {
+    const root = makeRoot('Hello <span contenteditable="false">@alice</span> today');
+    const dom = buildDomText(root);
+    expect(applyDomEdit(dom, 6, 6, '', 'dear ')).toBe(false);
+    expect(root.textContent).toBe('Hello @alice today');
+  });
+
+  it('does not delete a hidden subtree crossed by a projected edit', () => {
+    const root = makeRoot('a<span hidden>secret</span>b');
+    const hidden = root.querySelector('span')!;
+    const dom = buildDomText(root);
+    expect(dom.text).toBe('ab');
+    expect(applyDomEdit(dom, 0, 2, 'ab', 'AB')).toBe(false);
+    expect(hidden.isConnected).toBe(true);
+    expect(hidden.textContent).toBe('secret');
+  });
+
+  it('does not delete a DOM-only protected token crossed by an edit', () => {
+    const root = makeRoot('a<span contenteditable="false"><img alt="mention" /></span>b');
+    const token = root.querySelector('[contenteditable="false"]')!;
+    const dom = buildDomText(root);
+    expect(dom.text).toBe('ab');
+    expect(applyDomEdit(dom, 0, 2, 'ab', 'AB')).toBe(false);
+    expect(token.isConnected).toBe(true);
   });
 });

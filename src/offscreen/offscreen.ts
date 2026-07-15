@@ -1,6 +1,7 @@
 import { Corrector } from './corrector';
 import {
   broadcastStatus,
+  isBackgroundSender,
   isOffscreenMessage,
   type CheckResult,
   type ModelStatus,
@@ -22,13 +23,25 @@ function getCorrector(): Corrector {
   return corrector;
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isOffscreenMessage(message)) return undefined;
+  if (!isBackgroundSender(sender, chrome.runtime.id)) {
+    log.warn(`Rejected unauthorized ${message.type} message.`);
+    return undefined;
+  }
 
   switch (message.type) {
     case 'config': {
-      getCorrector().setConfig(message.config);
-      sendResponse({ ok: true });
+      void getCorrector()
+        .setConfig(message.config)
+        .then(() => sendResponse({ ok: true }))
+        .catch((error: unknown) => {
+          log.error('Configuration failed.', error);
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
       return true;
     }
     case 'status': {
@@ -38,7 +51,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'warmup': {
       // Fire-and-forget: start loading and report progress via status broadcasts.
       void getCorrector()
-        .ensureLoaded()
+        .warmup()
         .catch((error: unknown) => log.error('Warmup failed.', error));
       sendResponse(getCorrector().getStatus());
       return true;
@@ -51,9 +64,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
     }
     case 'download': {
-      const { modelId } = message;
+      const { modelId, device } = message;
       void getCorrector()
-        .downloadModel(modelId)
+        .downloadModel(modelId, device)
         .catch((error: unknown) => log.error('Download failed.', error));
       sendResponse({ ok: true });
       return true;

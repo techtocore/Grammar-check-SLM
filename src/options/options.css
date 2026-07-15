@@ -107,6 +107,15 @@ body {
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
 }
 
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
 /* Chrome built-in AI setup card gets a gentle accent so it reads as special. */
 #ai-card {
   border: 1px solid rgba(99, 102, 241, 0.22);
@@ -352,6 +361,17 @@ input[type='range'] {
   }
   .mini-progress {
     background: #374151;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

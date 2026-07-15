@@ -1,4 +1,5 @@
 import {
+  isOffscreenSender,
   isStatusBroadcast,
   newRequestId,
   sendToBackground,
@@ -74,6 +75,7 @@ function renderStatusCard(status: ModelStatus | null): void {
   if (state === 'loading' && status) {
     progressWrap.hidden = false;
     bar.style.width = `${status.progress}%`;
+    progressWrap.setAttribute('aria-valuenow', String(status.progress));
   } else {
     progressWrap.hidden = true;
   }
@@ -190,7 +192,7 @@ async function correctNow(text: string): Promise<void> {
   if (seq !== editorSeq) return;
   inFlight = false;
   // Only render if the input still matches what we corrected.
-  if (el<HTMLTextAreaElement>('editor-input').value.trim() !== text) return;
+  if (el<HTMLTextAreaElement>('editor-input').value !== text) return;
   if (result.error) {
     setHint(result.error);
     return;
@@ -200,8 +202,8 @@ async function correctNow(text: string): Promise<void> {
 
 function runEditorCorrect(): void {
   if (editorTimer !== null) clearTimeout(editorTimer);
-  const text = el<HTMLTextAreaElement>('editor-input').value.trim();
-  if (!text) {
+  const text = el<HTMLTextAreaElement>('editor-input').value;
+  if (!text.trim()) {
     editorSeq++; // cancel any in-flight render
     inFlight = false;
     hideResult();
@@ -276,7 +278,10 @@ function wireEditor(): void {
 
 function activateTab(name: string): void {
   document.querySelectorAll<HTMLElement>('.tab').forEach((tab) => {
-    tab.classList.toggle('active', tab.dataset.tab === name);
+    const active = tab.dataset.tab === name;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-selected', String(active));
+    tab.tabIndex = active ? 0 : -1;
   });
   el('panel-editor').hidden = name !== 'editor';
   el('panel-controls').hidden = name !== 'controls';
@@ -284,8 +289,22 @@ function activateTab(name: string): void {
 }
 
 function wireTabs(): void {
-  document.querySelectorAll<HTMLButtonElement>('.tab').forEach((tab) => {
+  const tabs = [...document.querySelectorAll<HTMLButtonElement>('.tab')];
+  tabs.forEach((tab, index) => {
     tab.addEventListener('click', () => activateTab(tab.dataset.tab ?? 'editor'));
+    tab.addEventListener('keydown', (event) => {
+      let next: number;
+      if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+      else if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = tabs.length - 1;
+      else return;
+      event.preventDefault();
+      const nextTab = tabs[next];
+      if (!nextTab) return;
+      activateTab(nextTab.dataset.tab ?? 'editor');
+      nextTab.focus();
+    });
   });
 }
 
@@ -326,8 +345,8 @@ let aiAvailability: AiAvailability | null = null;
 
 const BACKEND_DESC: Record<Settings['backend'], string> = {
   auto: "Uses Chrome's built-in AI when available, otherwise a local model.",
-  prompt: "Uses Chrome's built-in Gemini Nano — instant and private, no download.",
-  transformers: 'Runs a local model you download — works in any browser.',
+  prompt: "Uses Chrome's built-in Gemini Nano, which Chrome may download during setup.",
+  transformers: 'Runs a downloaded local model in supported Chromium browsers.',
 };
 
 function engineDescription(backend: Settings['backend']): string {
@@ -370,6 +389,7 @@ function renderEngine(): void {
     const active = seg.dataset.backend === backend;
     seg.classList.toggle('active', active);
     seg.setAttribute('aria-checked', String(active));
+    seg.tabIndex = active ? 0 : -1;
   });
 
   el('engine-desc').textContent = engineDescription(backend);
@@ -404,6 +424,9 @@ async function updateSettings(patch: Partial<Settings>): Promise<void> {
     patch,
   });
   renderControls();
+  renderStatus(
+    await sendToBackground<ModelStatus | null>({ type: 'status', target: 'background' }),
+  );
 }
 
 function wireControls(): void {
@@ -417,10 +440,29 @@ function wireControls(): void {
   el<HTMLSelectElement>('model-select').addEventListener('change', (e) => {
     void updateSettings({ model: (e.target as HTMLSelectElement).value });
   });
-  document.querySelectorAll<HTMLButtonElement>('.seg').forEach((seg) => {
+  const segments = [...document.querySelectorAll<HTMLButtonElement>('.seg')];
+  const chooseSegment = (seg: HTMLButtonElement): void => {
+    const backend = seg.dataset.backend as Settings['backend'] | undefined;
+    if (backend && backend !== settings?.backend) void updateSettings({ backend });
+  };
+  segments.forEach((seg, index) => {
     seg.addEventListener('click', () => {
-      const backend = seg.dataset.backend as Settings['backend'] | undefined;
-      if (backend && backend !== settings?.backend) void updateSettings({ backend });
+      chooseSegment(seg);
+    });
+    seg.addEventListener('keydown', (event) => {
+      let next: number;
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+        next = (index - 1 + segments.length) % segments.length;
+      } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+        next = (index + 1) % segments.length;
+      } else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = segments.length - 1;
+      else return;
+      event.preventDefault();
+      const nextSegment = segments[next];
+      if (!nextSegment) return;
+      chooseSegment(nextSegment);
+      nextSegment.focus();
     });
   });
   el<HTMLButtonElement>('engine-badge').addEventListener('click', () => {
@@ -454,8 +496,8 @@ async function consumePendingCorrection(): Promise<boolean> {
   } catch {
     return false;
   }
-  const text = pending?.text.trim();
-  if (!text) return false;
+  const text = pending?.text;
+  if (!text?.trim()) return false;
 
   activateTab('editor');
   const input = el<HTMLTextAreaElement>('editor-input');
@@ -476,23 +518,17 @@ async function init(): Promise<void> {
   wireControls();
   void loadAiAvailability();
 
-  chrome.runtime.onMessage.addListener((message: unknown) => {
-    if (isStatusBroadcast(message)) renderStatus(message.status);
+  chrome.runtime.onMessage.addListener((message: unknown, sender) => {
+    if (isOffscreenSender(sender, chrome.runtime.id) && isStatusBroadcast(message)) {
+      renderStatus(message.status);
+    }
   });
 
-  // Warm up the model (this also loads it) and reflect the result. Show an
-  // optimistic "loading" immediately so the user never sees a confusing "Idle"
-  // while the model is being prepared.
-  if (settings.enabled) {
-    renderStatus({ state: 'loading', progress: 0, modelId: '', device: 'unknown' });
-    void sendToBackground<ModelStatus>({ type: 'warmup', target: 'background' })
-      .then((status) => renderStatus(status))
-      .catch(() => undefined);
-  } else {
-    renderStatus(
-      await sendToBackground<ModelStatus | null>({ type: 'status', target: 'background' }),
-    );
-  }
+  // Opening the popup should not initiate a potentially large model download.
+  // The first actual correction (or focused page field) loads it on demand.
+  renderStatus(
+    await sendToBackground<ModelStatus | null>({ type: 'status', target: 'background' }),
+  );
 
   // A pending selection (from the context menu) takes over the editor; otherwise
   // just focus the empty input.

@@ -5,18 +5,18 @@
 ![AI: 100% on-device](https://img.shields.io/badge/AI-100%25%20on--device-10B981)
 ![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen)
 
-A privacy-first browser extension that fixes grammar and spelling **entirely on your device**. It uses Chrome's
-**built-in AI (Gemini Nano)** when available and falls back to a bundled **Qwen3** model via
-[Transformers.js](https://github.com/huggingface/transformers.js) — so your text **never leaves the
-browser**, online or off.
+A privacy-first Chromium extension that fixes grammar and spelling **entirely on your device**. It
+uses Chrome's **built-in AI (Gemini Nano)** when available and falls back to a downloaded **Qwen3**
+model via [Transformers.js](https://github.com/huggingface/transformers.js). Edited text is never
+uploaded; local model weights download once on first use and are then cached for offline use.
 
 ![Extension pop-up and suggested corrections](/assets/extension.png)
 
 ## ✨ Features
 
-- 🔒 **Truly private** — every check runs locally; nothing is ever sent to a server.
-- ⚡ **Chrome built-in AI first** — uses the **Prompt API (Gemini Nano)** when available: no model
-  download, shared across the browser, and extremely efficient — with automatic fallback when it isn't.
+- 🔒 **Truly private corrections** — every check runs locally; edited text is never uploaded.
+- ⚡ **Chrome built-in AI first** — uses the **Prompt API (Gemini Nano)** when available. Chrome
+  manages its one-time setup/download and shares the model across the browser.
 - 🤖 **Local SLM fallback** — Alibaba's **Qwen3 0.6B** (default) or **1.7B** via Transformers.js,
   **WebGPU**-accelerated with a WASM fallback. FLAN-T5 is available for maximum compatibility.
 - ✒️ **Real-world fields** — rich-text (`contenteditable`) **and** `<textarea>` / `<input>`.
@@ -52,14 +52,14 @@ Content script  ──check──▶  Service worker  ──config──▶  Off
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 20.19+
 - A Chromium-based browser, version **116+** (for the offscreen + `getContexts` APIs). WebGPU
   (Chrome 113+) is used automatically when available.
 
 ### Build
 
 ```bash
-npm install
+npm ci
 npm run build      # production build into ./build
 # or: npm run dev   # watch mode
 ```
@@ -76,10 +76,11 @@ npm run build      # production build into ./build
 > or serve the file over HTTP (e.g. `npx serve .` then open `http://localhost:3000/test.html`).
 
 On first use, Chrome built-in AI is ready right away (set up Gemini Nano once from Settings if
-prompted); a local model instead downloads from Hugging Face and is cached for offline use. Pre-filled
-fields are checked automatically — wavy underlines appear once the engine is ready. Open the page's
-DevTools console for `[GrammarSLM:content]` logs to confirm checks are running.
-
+prompted); a local model instead downloads from Hugging Face and is cached for offline use. The model
+loads only when you request a correction or focus an eligible field; the extension does not start a
+large download merely because it was installed or its popup was opened. Wavy underlines appear once
+the engine is ready. Open the page's DevTools console for `[GrammarSLM:content]` logs to confirm checks
+are running.
 
 ## ⚙️ Configuration
 
@@ -102,8 +103,8 @@ result for read-only text).
 ### Engines
 
 - **Chrome built-in AI (Prompt API / Gemini Nano)** — the default when your Chrome build supports it.
-  Nothing to download in the extension; the model is shared across the browser and very efficient.
-  The Settings page has a one-time **“Set up”** button to download Gemini Nano if needed.
+  Chrome manages the model and shares it across the browser. The Settings page has a one-time **“Set
+  up”** button when Chrome needs to download it.
 - **Local models (Transformers.js)** — the fallback. `Automatic` uses the recommended **Qwen3 0.6B**
   (loads reliably on the widest range of hardware); **Qwen3 1.7B** is opt-in for higher quality, and
   **FLAN-T5 Base** is a lightweight compatibility option. All are `onnx-community/*-ONNX` builds. The

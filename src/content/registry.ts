@@ -2,13 +2,10 @@ import { ContentEditableAdapter } from './fields/contenteditable-adapter';
 import { TextInputAdapter } from './fields/text-input-adapter';
 import { FieldController } from './controller';
 import type { Tooltip } from './tooltip';
-import type { FieldKind } from './fields/types';
-import { isElementVisible } from './fields/visibility';
+import { fieldKindFor } from './fields/eligibility';
 import type { Settings } from '../shared/settings';
 import { sendToBackground } from '../shared/messages';
 import { invalidateContext, isContextInvalidationError } from './lifecycle';
-
-const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'email', 'tel', '']);
 
 /** The genuinely focused element, descending through open shadow roots. */
 function deepActiveElement(root: DocumentOrShadowRoot = document): Element | null {
@@ -39,7 +36,6 @@ export class FieldRegistry {
     document.addEventListener('focusin', this.onFocusIn, true);
     const active = deepActiveElement();
     if (active instanceof HTMLElement) this.maybeAttach(active);
-    this.scanExisting();
     this.syncObserver();
   }
 
@@ -66,22 +62,6 @@ export class FieldRegistry {
     }
   }
 
-  /** Attaches to editable fields already present on the page (e.g. pre-filled). */
-  private scanExisting(): void {
-    const candidates = document.querySelectorAll<HTMLElement>(
-      '[contenteditable=""],[contenteditable="true"],textarea,input',
-    );
-    let count = 0;
-    for (const element of candidates) {
-      if (count >= 40) break;
-      if (!this.kindFor(element)) continue;
-      // Skip hidden fields (but always include the focused one).
-      if (element !== document.activeElement && !isElementVisible(element)) continue;
-      this.maybeAttach(element);
-      count++;
-    }
-  }
-
   stop(): void {
     this.started = false;
     document.removeEventListener('focusin', this.onFocusIn, true);
@@ -100,7 +80,7 @@ export class FieldRegistry {
     }
     if (!this.started) this.start();
     for (const [element, controller] of [...this.controllers]) {
-      if (!this.kindFor(element)) {
+      if (!fieldKindFor(element, settings)) {
         controller.destroy();
         this.controllers.delete(element);
       } else {
@@ -150,7 +130,7 @@ export class FieldRegistry {
         if (
           target instanceof HTMLElement &&
           this.controllers.has(target) &&
-          !this.kindFor(target)
+          !fieldKindFor(target, this.settings)
         ) {
           this.controllers.get(target)?.destroy();
           this.controllers.delete(target);
@@ -171,7 +151,7 @@ export class FieldRegistry {
 
   private cleanupRemoved(removed: HTMLElement): void {
     for (const [element, controller] of [...this.controllers]) {
-      if (removed === element || removed.contains(element)) {
+      if (!element.isConnected && (removed === element || removed.contains(element))) {
         controller.destroy();
         this.controllers.delete(element);
       }
@@ -180,7 +160,7 @@ export class FieldRegistry {
 
   private maybeAttach(element: HTMLElement): void {
     if (this.controllers.has(element)) return;
-    const kind = this.kindFor(element);
+    const kind = fieldKindFor(element, this.settings);
     if (!kind) return;
     const adapter =
       kind === 'contenteditable'
@@ -192,29 +172,6 @@ export class FieldRegistry {
     );
     this.syncObserver();
     this.warmup();
-  }
-
-  private kindFor(element: HTMLElement): FieldKind | null {
-    if (this.settings.checkContentEditable) {
-      const attr = element.getAttribute('contenteditable');
-      if ((attr === '' || attr === 'true') && element.isContentEditable) {
-        return 'contenteditable';
-      }
-    }
-    if (this.settings.checkTextInputs) {
-      if (element instanceof HTMLTextAreaElement && !element.readOnly && !element.disabled) {
-        return 'textinput';
-      }
-      if (
-        element instanceof HTMLInputElement &&
-        TEXT_INPUT_TYPES.has(element.type) &&
-        !element.readOnly &&
-        !element.disabled
-      ) {
-        return 'textinput';
-      }
-    }
-    return null;
   }
 
   private warmup(): void {

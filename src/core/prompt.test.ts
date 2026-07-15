@@ -47,6 +47,9 @@ describe('cleanModelOutput', () => {
     expect(cleanModelOutput('Here is the corrected sentence: He goes home.', 'x')).toBe(
       'He goes home.',
     );
+    expect(cleanModelOutput('Here is your corrected sentence: He goes home.', 'x')).toBe(
+      'He goes home.',
+    );
     expect(cleanModelOutput('Output: He goes home.', 'x')).toBe('He goes home.');
   });
 
@@ -57,6 +60,24 @@ describe('cleanModelOutput', () => {
 
   it('does not strip internal quotes', () => {
     expect(cleanModelOutput('He said "hi" to me.', 'x')).toBe('He said "hi" to me.');
+  });
+
+  it('preserves quotes that are part of the source sentence', () => {
+    expect(cleanModelOutput('"He goes home."', '"He go home."')).toBe('"He goes home."');
+  });
+
+  it('preserves legitimate label-like text from the source', () => {
+    const source = 'Here is my answer: the project is ready for review tomorrow.';
+    expect(cleanModelOutput(source, source)).toBe(source);
+    expect(cleanModelOutput('Answer: Yes, it is.', 'Answer: No, it is not.')).toBe(
+      'Answer: Yes, it is.',
+    );
+  });
+
+  it('preserves literal think tags from the source', () => {
+    expect(cleanModelOutput('<think>He goes home.</think>', '<think>He go home.</think>')).toBe(
+      '<think>He goes home.</think>',
+    );
   });
 
   it('falls back to the source when output is empty', () => {
@@ -73,6 +94,22 @@ describe('cleanModelOutput', () => {
   it('keeps only the corrected sentence, dropping trailing explanation lines', () => {
     expect(cleanModelOutput('He goes home.\n\nExplanation: fixed the verb.', 'x')).toBe(
       'He goes home.',
+    );
+  });
+
+  it('drops common unlabelled commentary on a following line', () => {
+    const source = 'This is a fairly long sentence that contain one simple grammar mistake today.';
+    const raw =
+      'This is a fairly long sentence that contains one simple grammar mistake today.\nI fixed the verb.';
+    expect(cleanModelOutput(raw, source)).toBe(
+      'This is a fairly long sentence that contains one simple grammar mistake today.',
+    );
+  });
+
+  it('joins an answer wrapped across multiple lines', () => {
+    const source = 'One two three four five six seven eight nine ten.';
+    expect(cleanModelOutput('One two three four five six\r\nseven eight nine ten.', source)).toBe(
+      source,
     );
   });
 

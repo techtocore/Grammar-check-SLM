@@ -37,12 +37,12 @@ function shouldRunInFrame(origin: string | null): boolean {
 }
 
 async function main(): Promise<void> {
+  // Selection correction is explicitly user-triggered and works even where
+  // automatic checking is disabled, including cross-origin subframes.
+  initSelectionCorrection();
+
   const origin = governingOrigin();
   if (!shouldRunInFrame(origin)) return;
-
-  // The right-click "Correct selection" action works on any page, independent of
-  // whether live checking is enabled for this site.
-  initSelectionCorrection();
 
   const settings = await loadSettings();
   const tooltip = new Tooltip();
