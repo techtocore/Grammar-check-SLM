@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Grammar Check SLM",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Private, on-device grammar and spell checking powered by local small language models with WebGPU acceleration.",
   "homepage_url": "https://github.com/techtocore/Grammar-check-SLM",
   "minimum_chrome_version": "116",

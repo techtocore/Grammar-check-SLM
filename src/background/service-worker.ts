@@ -7,6 +7,7 @@ import {
   newRequestId,
   sendToOffscreen,
   type CheckResult,
+  type ModelDownloadStatus,
   type ContentMessage,
   type ModelInfo,
   type ModelStatus,
@@ -21,10 +22,11 @@ import {
   type Settings,
 } from '../shared/settings';
 import { MODEL_PRESETS } from '../shared/models';
-import { deleteModelCache, listCachedModels } from '../shared/model-cache';
+import { listModelCacheInfo } from '../shared/model-cache';
 import { setPendingCorrection, clearPendingCorrection } from '../shared/pending';
 import { applyCorrections } from '../core/corrections';
 import { createLogger } from '../shared/logger';
+import { handleFirstRunInstall } from './first-run';
 
 const log = createLogger('background');
 
@@ -127,9 +129,7 @@ async function syncRunnerAfterSettings(
   patch: Partial<Settings>,
 ): Promise<void> {
   if (!settings.enabled) {
-    await closeOffscreen().catch((error: unknown) =>
-      log.warn('Could not close the offscreen model after disabling.', error),
-    );
+    await suspendExistingRunner();
     lastStatus = { state: 'disabled', progress: 0, modelId: '', device: 'unknown' };
     return;
   }
@@ -140,12 +140,24 @@ async function syncRunnerAfterSettings(
   }
 
   if (affectsRunner(patch)) {
-    // Release all old WASM/GPU memory, but do not recreate or warm the new model
-    // until the user actually requests a correction.
-    await closeOffscreen().catch((error: unknown) =>
-      log.warn('Could not close the model runner after reconfiguration.', error),
-    );
+    // Queue disposal behind active inference/download work. Closing the whole
+    // document here could destroy a newly accepted first-run download.
+    await suspendExistingRunner();
     lastStatus = { state: 'idle', progress: 0, modelId: '', device: 'unknown' };
+  }
+}
+
+async function suspendExistingRunner(): Promise<void> {
+  const exists = await offscreenExists().catch(() => false);
+  if (!exists) return;
+  try {
+    const response = await sendToOffscreen<{ ok: boolean }>({
+      type: 'suspend',
+      target: 'offscreen',
+    });
+    if (!response.ok) throw new Error('The model runner did not accept suspension.');
+  } catch (error) {
+    log.warn('Could not suspend the model runner.', error);
   }
 }
 
@@ -162,7 +174,15 @@ async function handleRetry(): Promise<ModelStatus> {
 
 async function handleModelsList(): Promise<ModelInfo[]> {
   const settings = await loadSettings();
-  const cached = await listCachedModels(MODEL_PRESETS.map((p) => p.modelId));
+  const cachePreference = await cachePreferenceFor(settings.device);
+  const [cacheInfo, downloadStatuses] = await Promise.all([
+    listModelCacheInfo(
+      MODEL_PRESETS.map((preset) => preset.modelId),
+      cachePreference,
+    ),
+    handleDownloadStatuses(),
+  ]);
+  const downloadsByModel = new Map(downloadStatuses.map((status) => [status.modelId, status]));
   const localActive = settings.backend !== 'prompt';
   const activeModel = settings.model === 'auto' ? 'qwen3-0.6b' : settings.model;
   return MODEL_PRESETS.map((preset) => ({
@@ -172,31 +192,98 @@ async function handleModelsList(): Promise<ModelInfo[]> {
     description: preset.description,
     approxDownloadMB: preset.approxDownloadMB,
     requiresWebGPU: preset.requiresWebGPU ?? false,
-    cached: cached[preset.modelId] ?? false,
+    cached: cacheInfo[preset.modelId]?.cached ?? false,
+    partial: cacheInfo[preset.modelId]?.partial ?? false,
     active: localActive && activeModel === preset.id,
+    download: downloadsByModel.get(preset.modelId),
   }));
 }
 
-async function handleModelsDownload(modelId: string): Promise<{ ok: boolean }> {
-  if (!MODEL_PRESETS.some((preset) => preset.modelId === modelId)) return { ok: false };
+async function cachePreferenceFor(preference: Settings['device']): Promise<Settings['device']> {
+  if (preference !== 'auto') return preference;
+  await ensureOffscreen();
+  const capability = await sendToOffscreen<{ hasWebGPU: boolean }>({
+    type: 'device:detect',
+    target: 'offscreen',
+  });
+  return capability.hasWebGPU ? 'auto' : 'wasm';
+}
+
+async function handleDownloadStatuses(): Promise<ModelDownloadStatus[]> {
+  const exists = await offscreenExists().catch(() => false);
+  if (!exists) return [];
+  return sendToOffscreen<ModelDownloadStatus[]>({
+    type: 'downloads:status',
+    target: 'offscreen',
+  });
+}
+
+async function handleModelsDownload(
+  modelId: string,
+  purpose?: 'onboarding',
+): Promise<{ ok: boolean; error?: string }> {
+  if (!MODEL_PRESETS.some((preset) => preset.modelId === modelId)) {
+    return { ok: false, error: 'Unknown local model.' };
+  }
   const settings = await loadSettings();
   await ensureOffscreen();
   // The offscreen document acknowledges immediately and reports progress via broadcasts.
-  await sendToOffscreen({
+  const response = await sendToOffscreen<{ ok: boolean; error?: string }>({
     type: 'download',
     target: 'offscreen',
     modelId,
     device: settings.device,
+    purpose,
   });
-  return { ok: true };
+  return response.ok
+    ? { ok: true }
+    : { ok: false, error: response.error ?? 'The model download could not be started.' };
 }
 
-async function handleModelsDelete(modelId: string): Promise<{ ok: boolean; deleted: number }> {
+async function handleOnboardingSelect(
+  modelId: string,
+  cached: boolean,
+): Promise<{ ok: boolean; reset: boolean; error?: string }> {
   if (!MODEL_PRESETS.some((preset) => preset.modelId === modelId)) {
-    return { ok: false, deleted: 0 };
+    return { ok: false, reset: false, error: 'Unknown local model.' };
   }
-  const deleted = await deleteModelCache(modelId);
-  return { ok: true, deleted };
+  const settings = await loadSettings();
+  await ensureOffscreen();
+  const state = await sendToOffscreen<{
+    hasMatchingRunning: boolean;
+    hasObsoleteRunning: boolean;
+    hasMatchingRunnerLoading: boolean;
+    hasObsoleteRunnerLoading: boolean;
+    clearedObsoleteStatus: boolean;
+    error?: string;
+  }>({
+    type: 'onboarding:select',
+    target: 'offscreen',
+    modelId,
+    device: settings.device,
+  });
+  if (state.error) return { ok: false, reset: false, error: state.error };
+  const reset =
+    state.hasObsoleteRunning ||
+    state.hasObsoleteRunnerLoading ||
+    state.clearedObsoleteStatus ||
+    (cached && (state.hasMatchingRunning || state.hasMatchingRunnerLoading));
+  if (reset) await closeOffscreen();
+  return { ok: true, reset };
+}
+
+async function handleModelsDelete(
+  modelId: string,
+): Promise<{ ok: boolean; deleted: number; error?: string }> {
+  if (!MODEL_PRESETS.some((preset) => preset.modelId === modelId)) {
+    return { ok: false, deleted: 0, error: 'Unknown local model.' };
+  }
+  await ensureOffscreen();
+  return sendToOffscreen<{ ok: boolean; deleted: number; error?: string }>({
+    type: 'download:delete',
+    target: 'offscreen',
+    modelId,
+  });
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -243,18 +330,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
     case 'models:download': {
-      handleModelsDownload(message.modelId)
+      handleModelsDownload(message.modelId, message.purpose)
         .then(sendResponse)
         .catch((error: unknown) => {
           log.error('Model download failed.', error);
-          sendResponse({ ok: false });
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
         });
+      return true;
+    }
+    case 'models:onboarding:select': {
+      handleOnboardingSelect(message.modelId, message.cached)
+        .then(sendResponse)
+        .catch((error: unknown) =>
+          sendResponse({
+            ok: false,
+            reset: false,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
       return true;
     }
     case 'models:delete': {
       handleModelsDelete(message.modelId)
         .then(sendResponse)
-        .catch(() => sendResponse({ ok: false, deleted: 0 }));
+        .catch((error: unknown) =>
+          sendResponse({
+            ok: false,
+            deleted: 0,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
       return true;
     }
     case 'check': {
@@ -317,7 +425,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // ---- Context menu: quickly toggle checking on the current site ----
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   chrome.contextMenus.create(
     {
       id: CONTEXT_MENU_CORRECT,
@@ -333,6 +441,9 @@ chrome.runtime.onInstalled.addListener(() => {
       contexts: ['action', 'editable'],
     },
     () => void chrome.runtime.lastError,
+  );
+  void handleFirstRunInstall(details).catch((error: unknown) =>
+    log.error('Could not open first-run Settings.', error),
   );
 });
 

@@ -43,7 +43,16 @@ export interface ModelInfo {
   approxDownloadMB: number;
   requiresWebGPU: boolean;
   cached: boolean;
+  partial: boolean;
   active: boolean;
+  download?: ModelDownloadStatus;
+}
+
+export interface ModelDownloadStatus {
+  modelId: string;
+  state: 'downloading' | 'error';
+  progress: number;
+  error?: string;
 }
 
 // ---- Messages addressed to the background service worker ----
@@ -58,7 +67,18 @@ export type BackgroundMessage =
   | { type: 'settings:set'; target: 'background'; patch: Partial<Settings> }
   | { type: 'site:enabled'; target: 'background'; origin: string }
   | { type: 'models:list'; target: 'background' }
-  | { type: 'models:download'; target: 'background'; modelId: string }
+  | {
+      type: 'models:download';
+      target: 'background';
+      modelId: string;
+      purpose?: 'onboarding';
+    }
+  | {
+      type: 'models:onboarding:select';
+      target: 'background';
+      modelId: string;
+      cached: boolean;
+    }
   | { type: 'models:delete'; target: 'background'; modelId: string };
 
 // ---- Messages addressed to the offscreen document ----
@@ -67,6 +87,16 @@ export type OffscreenMessage =
   | { type: 'status'; target: 'offscreen' }
   | { type: 'warmup'; target: 'offscreen' }
   | { type: 'reload'; target: 'offscreen' }
+  | { type: 'suspend'; target: 'offscreen' }
+  | { type: 'device:detect'; target: 'offscreen' }
+  | { type: 'downloads:status'; target: 'offscreen' }
+  | {
+      type: 'onboarding:select';
+      target: 'offscreen';
+      modelId: string;
+      device: DevicePreference;
+    }
+  | { type: 'download:delete'; target: 'offscreen'; modelId: string }
   | { type: 'check'; target: 'offscreen'; requestId: string; text: string }
   | { type: 'config'; target: 'offscreen'; config: RunnerConfig }
   | {
@@ -74,6 +104,7 @@ export type OffscreenMessage =
       target: 'offscreen';
       modelId: string;
       device: DevicePreference;
+      purpose?: 'onboarding';
     };
 
 // ---- Messages addressed to a page's content script (via chrome.tabs.sendMessage) ----
@@ -101,7 +132,7 @@ export interface DownloadProgress {
   type: 'download:progress';
   target: 'ui';
   modelId: string;
-  state: 'downloading' | 'done' | 'error';
+  state: 'downloading' | 'done' | 'error' | 'cancelled';
   progress: number;
   error?: string;
 }
@@ -147,8 +178,9 @@ export function isBackgroundMessage(msg: unknown): msg is BackgroundMessage {
     case 'warmup':
     case 'retry':
     case 'settings:get':
-    case 'models:list':
       return true;
+    case 'models:list':
+      return msg.device === undefined;
     case 'check':
     case 'correct':
       return hasText(msg.requestId) && typeof msg.text === 'string';
@@ -157,6 +189,9 @@ export function isBackgroundMessage(msg: unknown): msg is BackgroundMessage {
     case 'site:enabled':
       return hasText(msg.origin);
     case 'models:download':
+      return hasText(msg.modelId) && (msg.purpose === undefined || msg.purpose === 'onboarding');
+    case 'models:onboarding:select':
+      return hasText(msg.modelId) && typeof msg.cached === 'boolean';
     case 'models:delete':
       return hasText(msg.modelId);
     default:
@@ -170,13 +205,29 @@ export function isOffscreenMessage(msg: unknown): msg is OffscreenMessage {
     case 'status':
     case 'warmup':
     case 'reload':
+    case 'suspend':
+    case 'device:detect':
+    case 'downloads:status':
       return true;
     case 'check':
       return hasText(msg.requestId) && typeof msg.text === 'string';
     case 'config':
       return isRecord(msg.config);
     case 'download':
-      return hasText(msg.modelId) && ['auto', 'webgpu', 'wasm'].includes(String(msg.device));
+      return (
+        hasText(msg.modelId) &&
+        typeof msg.device === 'string' &&
+        ['auto', 'webgpu', 'wasm'].includes(msg.device) &&
+        (msg.purpose === undefined || msg.purpose === 'onboarding')
+      );
+    case 'onboarding:select':
+      return (
+        hasText(msg.modelId) &&
+        typeof msg.device === 'string' &&
+        ['auto', 'webgpu', 'wasm'].includes(msg.device)
+      );
+    case 'download:delete':
+      return hasText(msg.modelId);
     default:
       return false;
   }
@@ -189,11 +240,20 @@ export function isStatusBroadcast(msg: unknown): msg is StatusBroadcast {
 }
 
 export function isDownloadProgress(msg: unknown): msg is DownloadProgress {
-  return (
-    typeof msg === 'object' &&
-    msg !== null &&
-    (msg as { type?: string }).type === 'download:progress'
-  );
+  if (
+    !isRecord(msg) ||
+    msg.type !== 'download:progress' ||
+    msg.target !== 'ui' ||
+    !hasText(msg.modelId) ||
+    !['downloading', 'done', 'error', 'cancelled'].includes(String(msg.state)) ||
+    typeof msg.progress !== 'number' ||
+    !Number.isFinite(msg.progress) ||
+    msg.progress < 0 ||
+    msg.progress > 100
+  ) {
+    return false;
+  }
+  return msg.error === undefined || typeof msg.error === 'string';
 }
 
 export function isContentMessage(msg: unknown): msg is ContentMessage {

@@ -11,6 +11,11 @@ import {
 import type { ModelStatus, RunnerConfig } from '../shared/messages';
 import { createLogger } from '../shared/logger';
 import { promptApiLanguageOptions } from '../shared/prompt-language';
+import {
+  getCompletedModelDevices,
+  markModelDownloadComplete,
+  markModelDownloadStarted,
+} from '../shared/model-cache';
 
 const log = createLogger('backend');
 
@@ -65,7 +70,7 @@ const createPipeline = pipeline as unknown as (
   options?: Record<string, unknown>,
 ) => Promise<TextGenerator>;
 
-async function detectWebGPU(): Promise<boolean> {
+export async function detectWebGPU(): Promise<boolean> {
   try {
     const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
     if (!gpu) return false;
@@ -79,6 +84,25 @@ function deviceCandidates(pref: RunnerConfig['device'], hasWebGPU: boolean): ('w
   if (pref === 'wasm') return ['wasm'];
   if (pref === 'webgpu') return ['webgpu'];
   return hasWebGPU ? ['webgpu', 'wasm'] : ['wasm'];
+}
+
+async function orderedDeviceCandidates(
+  pref: RunnerConfig['device'],
+  hasWebGPU: boolean,
+  modelId: string,
+): Promise<('webgpu' | 'wasm')[]> {
+  const candidates = deviceCandidates(pref, hasWebGPU);
+  if (pref !== 'auto') return candidates;
+  const completed = new Set(
+    await getCompletedModelDevices(modelId).catch((error: unknown) => {
+      log.warn('Could not inspect cached model backends.', error);
+      return [];
+    }),
+  );
+  return [
+    ...candidates.filter((device) => completed.has(device)),
+    ...candidates.filter((device) => !completed.has(device)),
+  ];
 }
 
 function dtypeCandidates(preset: ModelPreset, device: 'webgpu' | 'wasm'): DType[] {
@@ -192,10 +216,12 @@ export class TransformersBackend implements Backend {
       throw new Error('WebGPU is not available on this device.');
     }
     const preset = resolvePreset(config.model, hasWebGPU);
+    const devices = await orderedDeviceCandidates(config.device, hasWebGPU, preset.modelId);
+    await markModelDownloadStarted(preset.modelId, config.device);
     const expectedBytes = preset.approxDownloadMB * 1024 * 1024;
     let lastError: unknown = new Error('No backend available');
 
-    for (const device of deviceCandidates(config.device, hasWebGPU)) {
+    for (const device of devices) {
       const dtypes = dtypeCandidates(preset, device);
       for (const [index, dtype] of dtypes.entries()) {
         const aggregator = new ProgressAggregator(expectedBytes);
@@ -207,6 +233,9 @@ export class TransformersBackend implements Backend {
           });
           this.generator = generator;
           this.preset = preset;
+          await markModelDownloadComplete(preset.modelId, device).catch((error: unknown) =>
+            log.warn('Could not record the completed model cache.', error),
+          );
           return { label: preset.label, modelId: preset.modelId, device };
         } catch (error) {
           lastError = error;
@@ -266,9 +295,11 @@ export async function downloadTransformersModel(
   if (devicePreference === 'webgpu' && !hasWebGPU) {
     throw new Error('WebGPU is not available on this device.');
   }
+  const devices = await orderedDeviceCandidates(devicePreference, hasWebGPU, preset.modelId);
+  await markModelDownloadStarted(preset.modelId, devicePreference);
   const expectedBytes = preset.approxDownloadMB * 1024 * 1024;
   let lastError: unknown = new Error('No backend available');
-  for (const device of deviceCandidates(devicePreference, hasWebGPU)) {
+  for (const device of devices) {
     const dtypes = dtypeCandidates(preset, device);
     for (const [index, dtype] of dtypes.entries()) {
       const aggregator = new ProgressAggregator(expectedBytes);
@@ -278,6 +309,7 @@ export async function downloadTransformersModel(
             onProgress(aggregator.update(raw));
         });
         await generator.dispose?.();
+        await markModelDownloadComplete(preset.modelId, device);
         return;
       } catch (error) {
         lastError = error;

@@ -3,6 +3,7 @@ import {
   isAuthorizedBackgroundMessage,
   isBackgroundMessage,
   isBackgroundSender,
+  isDownloadProgress,
   isOffscreenMessage,
   isOffscreenSender,
   type BackgroundMessage,
@@ -35,6 +36,30 @@ describe('runtime message validation', () => {
         device: 'cuda',
       }),
     ).toBe(false);
+    expect(
+      isDownloadProgress({
+        type: 'download:progress',
+        target: 'ui',
+        modelId: 'model',
+        state: 'downloading',
+        progress: 101,
+      }),
+    ).toBe(false);
+    expect(
+      isBackgroundMessage({
+        target: 'background',
+        type: 'models:list',
+        device: 'cuda',
+      }),
+    ).toBe(false);
+    expect(
+      isBackgroundMessage({
+        target: 'background',
+        type: 'models:download',
+        modelId: 'model',
+        purpose: 'prefetch',
+      }),
+    ).toBe(false);
   });
 
   it('accepts a complete discriminated message', () => {
@@ -44,6 +69,50 @@ describe('runtime message validation', () => {
         type: 'check',
         requestId: 'request-1',
         text: '',
+      }),
+    ).toBe(true);
+    expect(isOffscreenMessage({ target: 'offscreen', type: 'suspend' })).toBe(true);
+    expect(isOffscreenMessage({ target: 'offscreen', type: 'device:detect' })).toBe(true);
+    expect(isOffscreenMessage({ target: 'offscreen', type: 'downloads:status' })).toBe(true);
+    expect(
+      isOffscreenMessage({
+        target: 'offscreen',
+        type: 'download:delete',
+        modelId: 'model',
+      }),
+    ).toBe(true);
+    expect(
+      isOffscreenMessage({
+        target: 'offscreen',
+        type: 'onboarding:select',
+        modelId: 'model',
+        device: 'auto',
+      }),
+    ).toBe(true);
+    expect(
+      isDownloadProgress({
+        type: 'download:progress',
+        target: 'ui',
+        modelId: 'model',
+        state: 'downloading',
+        progress: 42,
+      }),
+    ).toBe(true);
+    expect(
+      isBackgroundMessage({
+        target: 'background',
+        type: 'models:onboarding:select',
+        modelId: 'model',
+        cached: true,
+      }),
+    ).toBe(true);
+    expect(
+      isDownloadProgress({
+        type: 'download:progress',
+        target: 'ui',
+        modelId: 'model',
+        state: 'cancelled',
+        progress: 0,
       }),
     ).toBe(true);
   });

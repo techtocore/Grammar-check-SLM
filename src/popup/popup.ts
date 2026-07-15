@@ -93,7 +93,7 @@ function renderStatusCard(status: ModelStatus | null): void {
   }
 
   const isError = state === 'error';
-  retry.hidden = !isError;
+  retry.hidden = !isError || status?.modelId === 'popup';
   errorDetail.hidden = !(isError && status?.error);
   errorDetail.textContent = isError ? (status?.error ?? '') : '';
 }
@@ -103,6 +103,17 @@ function renderStatus(status: ModelStatus | null): void {
   el('header-status').textContent = compactStatus(status);
   renderStatusCard(status);
   updateEditorHint();
+}
+
+function reportPopupError(context: string, error: unknown): void {
+  renderStatus({
+    state: 'error',
+    progress: 0,
+    modelId: 'popup',
+    device: 'unknown',
+    message: context,
+    error: error instanceof Error ? error.message : String(error),
+  });
 }
 
 // ============================ Editor ============================
@@ -418,32 +429,50 @@ async function loadAiAvailability(): Promise<void> {
 }
 
 async function updateSettings(patch: Partial<Settings>): Promise<void> {
-  settings = await sendToBackground<Settings>({
+  const next = await sendToBackground<Settings | null>({
     type: 'settings:set',
     target: 'background',
     patch,
   });
+  if (!next) throw new Error('The extension did not return updated settings.');
+  settings = next;
   renderControls();
-  renderStatus(
-    await sendToBackground<ModelStatus | null>({ type: 'status', target: 'background' }),
+  try {
+    renderStatus(
+      await sendToBackground<ModelStatus | null>({ type: 'status', target: 'background' }),
+    );
+  } catch (error) {
+    reportPopupError('Settings were saved, but model status could not be refreshed.', error);
+  }
+}
+
+function updateSettingsFromUi(patch: Partial<Settings>): void {
+  void updateSettings(patch).catch((error: unknown) =>
+    reportPopupError('Settings could not be saved.', error),
   );
+}
+
+function openOptionsPage(): void {
+  void chrome.runtime
+    .openOptionsPage()
+    .catch((error: unknown) => reportPopupError('Settings could not be opened.', error));
 }
 
 function wireControls(): void {
   el<HTMLInputElement>('toggle-enabled').addEventListener('change', (e) => {
-    void updateSettings({ enabled: (e.target as HTMLInputElement).checked });
+    updateSettingsFromUi({ enabled: (e.target as HTMLInputElement).checked });
   });
   el<HTMLInputElement>('toggle-site').addEventListener('change', (e) => {
     if (!settings || !origin) return;
-    void updateSettings(setSiteEnabled(settings, origin, (e.target as HTMLInputElement).checked));
+    updateSettingsFromUi(setSiteEnabled(settings, origin, (e.target as HTMLInputElement).checked));
   });
   el<HTMLSelectElement>('model-select').addEventListener('change', (e) => {
-    void updateSettings({ model: (e.target as HTMLSelectElement).value });
+    updateSettingsFromUi({ model: (e.target as HTMLSelectElement).value });
   });
   const segments = [...document.querySelectorAll<HTMLButtonElement>('.seg')];
   const chooseSegment = (seg: HTMLButtonElement): void => {
     const backend = seg.dataset.backend as Settings['backend'] | undefined;
-    if (backend && backend !== settings?.backend) void updateSettings({ backend });
+    if (backend && backend !== settings?.backend) updateSettingsFromUi({ backend });
   };
   segments.forEach((seg, index) => {
     seg.addEventListener('click', () => {
@@ -468,17 +497,16 @@ function wireControls(): void {
   el<HTMLButtonElement>('engine-badge').addEventListener('click', () => {
     // The badge only acts as a shortcut to set up Chrome AI in Settings.
     if (aiAvailability === 'downloadable' || aiAvailability === 'downloading') {
-      void chrome.runtime.openOptionsPage();
+      openOptionsPage();
     }
   });
-  const openOptions = (): void => void chrome.runtime.openOptionsPage();
-  el<HTMLButtonElement>('open-options').addEventListener('click', openOptions);
-  el<HTMLButtonElement>('open-options-2').addEventListener('click', openOptions);
+  el<HTMLButtonElement>('open-options').addEventListener('click', openOptionsPage);
+  el<HTMLButtonElement>('open-options-2').addEventListener('click', openOptionsPage);
   el<HTMLButtonElement>('retry').addEventListener('click', () => {
     renderStatus({ state: 'loading', progress: 0, modelId: '', device: 'unknown' });
     void sendToBackground<ModelStatus>({ type: 'retry', target: 'background' })
       .then(renderStatus)
-      .catch(() => undefined);
+      .catch((error: unknown) => reportPopupError('The model retry could not be started.', error));
   });
 }
 
@@ -508,14 +536,19 @@ async function consumePendingCorrection(): Promise<boolean> {
 }
 
 async function init(): Promise<void> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  origin = originOf(tab?.url);
-  settings = await sendToBackground<Settings>({ type: 'settings:get', target: 'background' });
-
-  renderControls();
   wireTabs();
   wireEditor();
   wireControls();
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  origin = originOf(tab?.url);
+  settings = await sendToBackground<Settings | null>({
+    type: 'settings:get',
+    target: 'background',
+  });
+  if (!settings) throw new Error('The extension did not return its settings.');
+
+  renderControls();
   void loadAiAvailability();
 
   chrome.runtime.onMessage.addListener((message: unknown, sender) => {
@@ -537,4 +570,6 @@ async function init(): Promise<void> {
   }
 }
 
-void init();
+void init().catch((error: unknown) =>
+  reportPopupError('The popup could not be initialized.', error),
+);

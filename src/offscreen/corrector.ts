@@ -3,10 +3,11 @@ import { assembleCorrections } from '../core/corrections';
 import { cleanModelOutput } from '../core/prompt';
 import { LRUCache } from '../core/cache';
 import type { Correction, Sentence } from '../core/types';
-import type { ModelStatus, RunnerConfig } from '../shared/messages';
+import type { ModelDownloadStatus, ModelStatus, RunnerConfig } from '../shared/messages';
 import { broadcastDownload } from '../shared/messages';
 import { getPreset, MODEL_PRESETS } from '../shared/models';
 import { createLogger } from '../shared/logger';
+import { deleteModelCache } from '../shared/model-cache';
 import { downloadTransformersModel, pickBackends, type Backend } from './backends';
 
 const log = createLogger('runner');
@@ -18,6 +19,12 @@ const MAX_SENTENCES = 60;
 // After a load failure, don't retry for this long (prevents a retry storm where
 // every incoming check re-runs the whole failing load and thrashes memory).
 const LOAD_RETRY_COOLDOWN_MS = 15000;
+
+interface DownloadOperation {
+  modelId: string;
+  purpose?: 'onboarding';
+  promise: Promise<void>;
+}
 
 /** Turns a raw load error into a short, user-actionable message. */
 function classifyError(error: unknown): string {
@@ -41,6 +48,9 @@ function classifyError(error: unknown): string {
   ) {
     return 'Network error while downloading the model. Check your connection, then retry.';
   }
+  if (text.includes('model cache') || text.includes('cache storage')) {
+    return 'Browser storage is unavailable for the local model. Free storage, then retry.';
+  }
   if (text.includes('built-in') || text.includes('unavailable')) {
     return 'Chrome built-in AI is unavailable. Switch to a local model in Settings.';
   }
@@ -63,6 +73,12 @@ export class Corrector {
   private loadGeneration = 0;
   private loadFailedAt = 0;
   private readonly cache = new LRUCache<string, string>(1000);
+  private readonly downloadStatuses = new Map<string, ModelDownloadStatus>();
+  private readonly downloadStatusOwners = new Map<string, string>();
+  private readonly downloadOperations = new Map<string, DownloadOperation>();
+  private readonly runningDownloadKeys = new Set<string>();
+  private readonly adoptedOnboardingKeys = new Set<string>();
+  private onboardingTarget: { modelId: string; device: RunnerConfig['device'] } | null = null;
   private chain: Promise<unknown> = Promise.resolve();
   private status: ModelStatus = { state: 'idle', progress: 0, modelId: '', device: 'unknown' };
 
@@ -73,6 +89,58 @@ export class Corrector {
 
   getStatus(): ModelStatus {
     return this.status;
+  }
+
+  getDownloadStatuses(): ModelDownloadStatus[] {
+    return [...this.downloadStatuses.values()].map((status) => ({ ...status }));
+  }
+
+  selectOnboardingTarget(
+    modelId: string,
+    device: RunnerConfig['device'],
+  ): {
+    hasMatchingRunning: boolean;
+    hasObsoleteRunning: boolean;
+    hasMatchingRunnerLoading: boolean;
+    hasObsoleteRunnerLoading: boolean;
+    clearedObsoleteStatus: boolean;
+  } {
+    const preset = MODEL_PRESETS.find((candidate) => candidate.modelId === modelId);
+    if (!preset) throw new Error(`Unknown model: ${modelId}`);
+
+    this.onboardingTarget = { modelId: preset.modelId, device };
+    const matchingKey = `${preset.modelId}\u0000${device}`;
+    const matching = this.downloadOperations.get(matchingKey);
+    const previousOwner = this.downloadStatusOwners.get(preset.modelId);
+    const clearedObsoleteStatus =
+      !matching && previousOwner !== undefined && previousOwner !== matchingKey;
+    if (clearedObsoleteStatus) {
+      this.downloadStatusOwners.delete(preset.modelId);
+      this.downloadStatuses.delete(preset.modelId);
+      broadcastDownload({ modelId: preset.modelId, state: 'cancelled', progress: 0 });
+    }
+    if (matching) {
+      matching.purpose = 'onboarding';
+      this.adoptedOnboardingKeys.add(matchingKey);
+      this.downloadStatusOwners.set(preset.modelId, matchingKey);
+      this.setDownloadStatus(matchingKey, {
+        modelId: preset.modelId,
+        state: 'downloading',
+        progress: 0,
+      });
+    }
+
+    const runningDownloads = [...this.downloadOperations.entries()].filter(([key]) =>
+      this.runningDownloadKeys.has(key),
+    );
+    const runnerLoading = this.runnerLoadingRelation(preset.modelId, device);
+    return {
+      hasMatchingRunning: this.runningDownloadKeys.has(matchingKey),
+      hasObsoleteRunning: runningDownloads.some(([key]) => key !== matchingKey),
+      hasMatchingRunnerLoading: runnerLoading === 'matching',
+      hasObsoleteRunnerLoading: runnerLoading === 'obsolete',
+      clearedObsoleteStatus,
+    };
   }
 
   /** Updates preferences after any active inference finishes; reloads lazily. */
@@ -143,6 +211,11 @@ export class Corrector {
     return this.runExclusive(() => this.ensureLoaded());
   }
 
+  /** Releases model memory after queued inference/download work has completed. */
+  suspend(): Promise<void> {
+    return this.runExclusive(() => this.dispose());
+  }
+
   async correct(text: string): Promise<Correction[]> {
     return this.runExclusive(async () => {
       await this.ensureLoaded();
@@ -183,30 +256,186 @@ export class Corrector {
    * Downloads and caches a Transformers.js model's files without making it
    * active. Progress is broadcast per model.
    */
-  async downloadModel(modelId: string, devicePreference: RunnerConfig['device']): Promise<void> {
+  downloadModel(
+    modelId: string,
+    devicePreference: RunnerConfig['device'],
+    purpose?: 'onboarding',
+  ): Promise<void> {
     const preset = MODEL_PRESETS.find((p) => p.modelId === modelId) ?? getPreset(modelId);
-    if (!preset) throw new Error(`Unknown model: ${modelId}`);
-    return this.runExclusive(async () => {
-      await this.dispose();
-      broadcastDownload({ modelId: preset.modelId, state: 'downloading', progress: 0 });
-      try {
-        await downloadTransformersModel(
-          preset,
-          (progress) =>
-            broadcastDownload({ modelId: preset.modelId, state: 'downloading', progress }),
-          devicePreference,
-        );
-        broadcastDownload({ modelId: preset.modelId, state: 'done', progress: 100 });
-      } catch (error) {
-        broadcastDownload({
+    if (!preset) return Promise.reject(new Error(`Unknown model: ${modelId}`));
+
+    if (purpose === 'onboarding') {
+      this.onboardingTarget = { modelId: preset.modelId, device: devicePreference };
+      this.adoptedOnboardingKeys.add(`${preset.modelId}\u0000${devicePreference}`);
+    }
+    const operationKey = `${preset.modelId}\u0000${devicePreference}`;
+    const existing = this.downloadOperations.get(operationKey);
+    if (existing) {
+      if (purpose === 'onboarding') {
+        this.downloadStatusOwners.set(preset.modelId, operationKey);
+        this.setDownloadStatus(operationKey, {
           modelId: preset.modelId,
-          state: 'error',
+          state: 'downloading',
           progress: 0,
-          error: classifyError(error),
         });
-        throw error;
+      }
+      return existing.promise;
+    }
+
+    this.downloadStatusOwners.set(preset.modelId, operationKey);
+    this.setDownloadStatus(operationKey, {
+      modelId: preset.modelId,
+      state: 'downloading',
+      progress: 0,
+    });
+    const operation = this.runExclusive(async () => {
+      this.runningDownloadKeys.add(operationKey);
+      try {
+        if (
+          this.isOnboardingOperation(operationKey, purpose) &&
+          !this.isCurrentOnboardingTarget(preset.modelId, devicePreference)
+        ) {
+          this.clearDownloadStatus(operationKey, preset.modelId, true);
+          return;
+        }
+        await this.dispose();
+        if (
+          this.isOnboardingOperation(operationKey, purpose) &&
+          !this.isCurrentOnboardingTarget(preset.modelId, devicePreference)
+        ) {
+          this.clearDownloadStatus(operationKey, preset.modelId, true);
+          return;
+        }
+        try {
+          await downloadTransformersModel(
+            preset,
+            (progress) => {
+              if (
+                !this.isOnboardingOperation(operationKey, purpose) ||
+                this.isCurrentOnboardingTarget(preset.modelId, devicePreference)
+              ) {
+                this.setDownloadStatus(operationKey, {
+                  modelId: preset.modelId,
+                  state: 'downloading',
+                  progress: Math.min(99, Math.max(0, Math.round(progress))),
+                });
+              }
+            },
+            devicePreference,
+          );
+          if (
+            !this.isOnboardingOperation(operationKey, purpose) ||
+            this.isCurrentOnboardingTarget(preset.modelId, devicePreference)
+          ) {
+            if (this.downloadStatusOwners.get(preset.modelId) === operationKey) {
+              this.clearDownloadStatus(operationKey, preset.modelId);
+              broadcastDownload({ modelId: preset.modelId, state: 'done', progress: 100 });
+            }
+          } else {
+            this.clearDownloadStatus(operationKey, preset.modelId, true);
+          }
+        } catch (error) {
+          if (
+            !this.isOnboardingOperation(operationKey, purpose) ||
+            this.isCurrentOnboardingTarget(preset.modelId, devicePreference)
+          ) {
+            this.setDownloadStatus(operationKey, {
+              modelId: preset.modelId,
+              state: 'error',
+              progress: 0,
+              error: classifyError(error),
+            });
+          } else {
+            this.clearDownloadStatus(operationKey, preset.modelId, true);
+          }
+          throw error;
+        }
+      } finally {
+        this.runningDownloadKeys.delete(operationKey);
       }
     });
+    const entry: DownloadOperation = { modelId: preset.modelId, purpose, promise: operation };
+    this.downloadOperations.set(operationKey, entry);
+    void operation.then(
+      () => {
+        if (this.downloadOperations.get(operationKey) === entry) {
+          this.downloadOperations.delete(operationKey);
+          this.adoptedOnboardingKeys.delete(operationKey);
+        }
+      },
+      () => {
+        if (this.downloadOperations.get(operationKey) === entry) {
+          this.downloadOperations.delete(operationKey);
+          this.adoptedOnboardingKeys.delete(operationKey);
+        }
+      },
+    );
+    return operation;
+  }
+
+  /** Deletes a model through the same queue used for downloads and inference. */
+  deleteModel(modelId: string): Promise<number> {
+    const preset = MODEL_PRESETS.find((candidate) => candidate.modelId === modelId);
+    if (!preset) return Promise.reject(new Error(`Unknown model: ${modelId}`));
+    if (
+      [...this.downloadOperations.values()].some(
+        (operation) => operation.modelId === preset.modelId,
+      )
+    ) {
+      return Promise.reject(new Error('Wait for the active download to finish.'));
+    }
+
+    this.downloadStatusOwners.delete(preset.modelId);
+    this.downloadStatuses.delete(preset.modelId);
+    return this.runExclusive(() => deleteModelCache(preset.modelId));
+  }
+
+  private isCurrentOnboardingTarget(modelId: string, device: RunnerConfig['device']): boolean {
+    return this.onboardingTarget?.modelId === modelId && this.onboardingTarget.device === device;
+  }
+
+  private isOnboardingOperation(operationKey: string, purpose?: 'onboarding'): boolean {
+    return purpose === 'onboarding' || this.adoptedOnboardingKeys.has(operationKey);
+  }
+
+  private runnerLoadingRelation(
+    modelId: string,
+    device: RunnerConfig['device'],
+  ): 'matching' | 'obsolete' | 'none' {
+    if (this.status.state !== 'loading' || this.status.device === 'built-in') return 'none';
+    const config = this.config;
+    if (!config || config.backend === 'prompt') return 'none';
+    const configuredModel =
+      this.status.modelId ||
+      (config.model === 'auto'
+        ? MODEL_PRESETS.find((preset) => preset.id === 'qwen3-0.6b')?.modelId
+        : getPreset(config.model)?.modelId);
+    if (!configuredModel) return 'none';
+
+    const concreteDevice =
+      this.status.device === 'webgpu' || this.status.device === 'wasm'
+        ? this.status.device
+        : config.device;
+    const deviceMatches =
+      device === 'auto' ||
+      concreteDevice === device ||
+      (concreteDevice === 'auto' && config.device === device);
+    return configuredModel === modelId && deviceMatches ? 'matching' : 'obsolete';
+  }
+
+  private clearDownloadStatus(operationKey: string, modelId: string, cancelled = false): void {
+    if (this.downloadStatusOwners.get(modelId) !== operationKey) return;
+    this.downloadStatusOwners.delete(modelId);
+    this.downloadStatuses.delete(modelId);
+    if (cancelled) {
+      broadcastDownload({ modelId, state: 'cancelled', progress: 0 });
+    }
+  }
+
+  private setDownloadStatus(operationKey: string, status: ModelDownloadStatus): void {
+    if (this.downloadStatusOwners.get(status.modelId) !== operationKey) return;
+    this.downloadStatuses.set(status.modelId, status);
+    broadcastDownload(status);
   }
 
   private setStatus(patch: Partial<ModelStatus>): void {

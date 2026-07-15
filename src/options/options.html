@@ -16,6 +16,35 @@
         </div>
       </header>
 
+      <div class="page-error" id="page-error" role="alert" hidden></div>
+
+      <section class="card first-run-card" id="first-run-card" hidden>
+        <div class="setup-eyebrow">First-time setup</div>
+        <h2>Download the private local model</h2>
+        <p class="setup-copy" id="first-run-copy">
+          Grammar Check SLM downloads its recommended model once and keeps it on this device for
+          private, offline checks.
+        </p>
+        <div class="setup-status-row">
+          <div id="first-run-status" role="status" aria-live="polite">Preparing download...</div>
+          <button class="model-btn download" id="first-run-action" type="button" hidden>
+            Retry download
+          </button>
+        </div>
+        <div
+          class="setup-progress"
+          id="first-run-progress"
+          role="progressbar"
+          aria-label="First-time model download progress"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+        >
+          <div class="setup-progress-bar" id="first-run-bar"></div>
+        </div>
+        <p class="hint">Keep this tab open until setup is complete.</p>
+      </section>
+
       <section class="card">
         <h2>General</h2>
         <div class="field row">

@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] — 2026-07-15
+
+### Added
+
+- First-install onboarding that opens Settings and downloads the selected local
+  model with visible progress, retries, and setup persistence.
+- Device-specific model-cache completion markers and cleanup for interrupted or
+  partial downloads.
+
+### Changed
+
+- Automatic acceleration now prefers a previously successful local backend and
+  falls back without repeating setup downloads.
+- Model download, deletion, retargeting, suspension, and cache cleanup now share
+  coordinated lifecycle handling.
+
+### Fixed
+
+- Stale setup responses, rapid model/device changes, duplicate requests, and
+  obsolete queued downloads can no longer complete or block the wrong target.
+- Popup initialization, settings updates, Settings shortcuts, and retry failures
+  now surface errors instead of producing unhandled promise rejections.
+- Warmup and retry requests now report loading immediately instead of returning
+  a stale idle status.
+
 ## [1.0.0] — 2026-07-12
 
 ### Added

@@ -75,12 +75,12 @@ npm run build      # production build into ./build
 > pages by default. Either enable **“Allow access to file URLs”** on the extension's details page,
 > or serve the file over HTTP (e.g. `npx serve .` then open `http://localhost:3000/test.html`).
 
-On first use, Chrome built-in AI is ready right away (set up Gemini Nano once from Settings if
-prompted); a local model instead downloads from Hugging Face and is cached for offline use. The model
-loads only when you request a correction or focus an eligible field; the extension does not start a
-large download merely because it was installed or its popup was opened. Wavy underlines appear once
-the engine is ready. Open the page's DevTools console for `[GrammarSLM:content]` logs to confirm checks
-are running.
+On first installation, the extension opens Settings and immediately downloads the recommended local
+model (about 550 MB), with visible progress and retry guidance. The model stays on the device and is
+cached for offline use, so the first grammar check does not unexpectedly start a large download.
+Chrome built-in AI can also be set up from Settings when supported. Wavy underlines appear once the
+selected engine is ready. Open the page's DevTools console for `[GrammarSLM:content]` logs to confirm
+checks are running.
 
 ## ⚙️ Configuration
 
