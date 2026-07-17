@@ -10,7 +10,7 @@
     <div class="wrap">
       <header class="header">
         <img class="logo" src="icons/icon48.png" alt="" />
-        <div>
+        <div class="header-copy">
           <h1>Grammar Check SLM</h1>
           <p class="subtitle">Private, on-device grammar checking powered by a local SLM.</p>
         </div>
@@ -18,7 +18,7 @@
 
       <div class="page-error" id="page-error" role="alert" hidden></div>
 
-      <section class="card first-run-card" id="first-run-card" hidden>
+      <section class="setup-card first-run-card" id="first-run-card" hidden>
         <div class="setup-eyebrow">First-time setup</div>
         <h2>Download the private local model</h2>
         <p class="setup-copy" id="first-run-copy">
@@ -45,121 +45,152 @@
         <p class="hint">Keep this tab open until setup is complete.</p>
       </section>
 
-      <section class="card">
-        <h2>General</h2>
-        <div class="field row">
-          <label for="enabled">Enable grammar checking</label>
-          <input type="checkbox" id="enabled" class="switch" />
-        </div>
-        <div class="field">
-          <label for="backend">AI engine</label>
-          <select id="backend" class="select">
-            <option value="auto">✨ Automatic — best available (recommended)</option>
-            <option value="prompt">⚡ Chrome built-in AI — Gemini Nano</option>
-            <option value="transformers">💻 Local model — Transformers.js</option>
-          </select>
-          <p class="hint" id="backend-desc"></p>
-        </div>
-        <div class="field" id="model-field">
-          <label for="model" id="model-label">Local model</label>
-          <select id="model" class="select"></select>
-          <p class="hint" id="model-desc"></p>
-        </div>
-        <div class="field" id="device-field">
-          <label for="device">Acceleration</label>
-          <select id="device" class="select">
-            <option value="auto">Automatic — WebGPU, fall back to CPU</option>
-            <option value="webgpu">WebGPU only (fastest)</option>
-            <option value="wasm">CPU / WASM only (most compatible)</option>
-          </select>
-          <p class="hint">Applies to local models only.</p>
-        </div>
-        <div class="field">
-          <label for="language">Language (BCP-47)</label>
-          <input id="language" class="input" type="text" placeholder="en" />
-        </div>
-        <div class="field">
-          <label for="debounce">Typing delay: <span id="debounce-val"></span> ms</label>
-          <input id="debounce" type="range" min="300" max="2500" step="100" />
-        </div>
-        <div class="field">
-          <label for="minWords">Minimum words before checking</label>
-          <input id="minWords" class="input" type="number" min="1" max="50" />
-        </div>
-      </section>
+      <main class="settings-layout">
+        <div class="settings-column primary-settings">
+          <section class="settings-section">
+            <h2>General</h2>
+            <div class="field row enable-row">
+              <label for="enabled">Enable grammar checking</label>
+              <input type="checkbox" id="enabled" class="switch" />
+            </div>
+            <div class="field">
+              <label for="backend">AI engine</label>
+              <select id="backend" class="select">
+                <option value="auto">Automatic (use any ready engine)</option>
+                <option value="prompt">Chrome built-in AI (Gemini Nano)</option>
+                <option value="transformers">Local model (default)</option>
+              </select>
+              <p class="hint" id="backend-desc"></p>
+            </div>
+            <div class="field-grid">
+              <div class="field" id="model-field">
+                <label for="model" id="model-label">Local model</label>
+                <select id="model" class="select"></select>
+                <p class="hint" id="model-desc"></p>
+              </div>
+              <div class="field" id="device-field">
+                <label for="device">Acceleration</label>
+                <select id="device" class="select">
+                  <option value="auto">Automatic (WebGPU or WASM)</option>
+                  <option value="webgpu">WebGPU only (fastest)</option>
+                  <option value="wasm">WASM only (most compatible)</option>
+                </select>
+                <p class="hint">Applies to local models only.</p>
+              </div>
+            </div>
+            <div class="field-grid compact-fields">
+              <div class="field">
+                <label for="language">Language</label>
+                <input
+                  id="language"
+                  class="input"
+                  type="text"
+                  list="language-options"
+                  placeholder="en-US"
+                />
+                <datalist id="language-options">
+                  <option value="en"></option>
+                  <option value="en-US"></option>
+                  <option value="en-GB"></option>
+                  <option value="de"></option>
+                  <option value="es"></option>
+                  <option value="fr"></option>
+                  <option value="it"></option>
+                  <option value="pt-BR"></option>
+                </datalist>
+                <p class="hint">BCP-47 language code.</p>
+              </div>
+              <div class="field">
+                <label for="minWords">Minimum words</label>
+                <input id="minWords" class="input" type="number" min="1" max="50" />
+                <p class="hint">Before a check starts.</p>
+              </div>
+            </div>
+            <div class="field range-field">
+              <label class="range-label" for="debounce">
+                <span>Typing delay</span>
+                <span class="range-value"><span id="debounce-val"></span> ms</span>
+              </label>
+              <input id="debounce" type="range" min="300" max="2500" step="100" />
+            </div>
+          </section>
 
-      <section class="card" id="ai-card" hidden>
-        <div class="models-head">
-          <h2>Chrome built-in AI</h2>
-          <div class="model-status" id="ai-status" role="status" aria-live="polite"></div>
-        </div>
-        <p class="hint" id="ai-hint"></p>
-        <div
-          class="mini-progress"
-          id="ai-progress"
-          role="progressbar"
-          aria-label="Chrome AI download progress"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          aria-valuenow="0"
-          hidden
-        >
-          <div class="mini-bar" id="ai-bar"></div>
-        </div>
-        <button class="model-btn download" id="ai-setup" type="button" hidden>
-          Set up (one-time download)
-        </button>
-      </section>
+          <section class="settings-section ai-section" id="ai-card" hidden>
+            <div class="models-head">
+              <h2>Chrome built-in AI</h2>
+              <div class="model-status" id="ai-status" role="status" aria-live="polite"></div>
+            </div>
+            <p class="hint" id="ai-hint"></p>
+            <div
+              class="mini-progress"
+              id="ai-progress"
+              role="progressbar"
+              aria-label="Chrome AI download progress"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
+              hidden
+            >
+              <div class="mini-bar" id="ai-bar"></div>
+            </div>
+            <button class="model-btn download" id="ai-setup" type="button" hidden>
+              Set up (one-time download)
+            </button>
+          </section>
 
-      <section class="card">
-        <div class="models-head">
-          <h2>Models</h2>
-          <div class="model-status" id="model-status" role="status" aria-live="polite"></div>
+          <section class="settings-section">
+            <div class="models-head">
+              <h2>Local models</h2>
+              <div class="model-status" id="model-status" role="status" aria-live="polite"></div>
+            </div>
+            <div class="models-list" id="models-list"></div>
+          </section>
         </div>
-        <div class="models-list" id="models-list"></div>
-      </section>
 
-      <section class="card">
-        <h2>Fields</h2>
-        <div class="field row">
-          <label for="ce">Check rich-text editors (contenteditable)</label>
-          <input type="checkbox" id="ce" class="switch" />
-        </div>
-        <div class="field row">
-          <label for="ti">Check inputs &amp; textareas</label>
-          <input type="checkbox" id="ti" class="switch" />
-        </div>
-      </section>
+        <div class="settings-column secondary-settings">
+          <section class="settings-section">
+            <h2>Fields</h2>
+            <div class="field row">
+              <label for="ce">Rich-text editors</label>
+              <input type="checkbox" id="ce" class="switch" />
+            </div>
+            <div class="field row">
+              <label for="ti">Inputs and textareas</label>
+              <input type="checkbox" id="ti" class="switch" />
+            </div>
+          </section>
 
-      <section class="card">
-        <h2>Sites</h2>
-        <div class="field">
-          <label for="siteMode">Where to run</label>
-          <select id="siteMode" class="select">
-            <option value="all">Everywhere</option>
-            <option value="allowlist">Only on allow-listed sites</option>
-            <option value="denylist">Everywhere except deny-listed sites</option>
-          </select>
+          <section class="settings-section">
+            <h2>Sites</h2>
+            <div class="field">
+              <label for="siteMode">Where to run</label>
+              <select id="siteMode" class="select">
+                <option value="all">Everywhere</option>
+                <option value="allowlist">Only on allow-listed sites</option>
+                <option value="denylist">Everywhere except deny-listed sites</option>
+              </select>
+            </div>
+            <div class="field" id="allow-wrap">
+              <label for="allowlist">Allow list</label>
+              <textarea
+                id="allowlist"
+                class="input"
+                rows="4"
+                placeholder="One origin per line, e.g. https://example.com"
+              ></textarea>
+            </div>
+            <div class="field" id="deny-wrap">
+              <label for="denylist">Deny list</label>
+              <textarea
+                id="denylist"
+                class="input"
+                rows="4"
+                placeholder="One origin per line, e.g. https://example.com"
+              ></textarea>
+            </div>
+          </section>
         </div>
-        <div class="field" id="allow-wrap">
-          <label for="allowlist">Allow list (one origin per line)</label>
-          <textarea
-            id="allowlist"
-            class="input"
-            rows="4"
-            placeholder="https://example.com"
-          ></textarea>
-        </div>
-        <div class="field" id="deny-wrap">
-          <label for="denylist">Deny list (one origin per line)</label>
-          <textarea
-            id="denylist"
-            class="input"
-            rows="4"
-            placeholder="https://example.com"
-          ></textarea>
-        </div>
-      </section>
+      </main>
 
       <footer class="footer">
         <span class="saved" id="saved" role="status" aria-live="polite" hidden>✓ Saved</span>

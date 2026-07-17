@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Simplified local model selection to Qwen3.5 0.8B on WebGPU and Qwen3 0.6B
   on WASM, removing Qwen3 1.7B and FLAN-T5.
+- Refined the popup and Settings UI with a quieter visual system, clearer
+  editor states, denser responsive settings, and improved mobile layouts.
+- Made the verified local model the fresh-install default; Automatic now skips
+  Chrome AI unless it is already ready instead of logging a load failure.
+- First-run setup now requires a successful grammar correction and activates
+  content scripts in eligible tabs that were already open during installation.
 
 ## [1.0.1] — 2026-07-15
 

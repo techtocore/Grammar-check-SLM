@@ -245,7 +245,9 @@ export function initSelectionCorrection(): void {
     if (message.type === 'gc-correcting') {
       pending.set(message.requestId, captureSelection(message.original));
       showSpinnerToast('Correcting…');
-    } else handleResult(message);
+    } else if (message.type === 'gc-correct-result') {
+      handleResult(message);
+    }
     return undefined;
   });
 }

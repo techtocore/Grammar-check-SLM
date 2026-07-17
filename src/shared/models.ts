@@ -27,7 +27,7 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
   {
     id: 'qwen3.5-0.8b',
     modelId: 'onnx-community/Qwen3.5-0.8B-ONNX',
-    label: 'Qwen3.5 0.8B · Recommended',
+    label: 'Qwen3.5 0.8B · WebGPU',
     description: 'Latest balanced model for modern devices with WebGPU.',
     task: 'text-generation',
     approxDownloadMB: 1000,
@@ -44,7 +44,7 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
   {
     id: 'qwen3-0.6b',
     modelId: 'onnx-community/Qwen3-0.6B-ONNX',
-    label: 'Qwen3 0.6B · Low memory',
+    label: 'Qwen3 0.6B · Compatible',
     description: 'Smaller fallback for older or memory-constrained devices.',
     task: 'text-generation',
     approxDownloadMB: 550,

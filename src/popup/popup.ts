@@ -100,6 +100,8 @@ function renderStatusCard(status: ModelStatus | null): void {
 
 function renderStatus(status: ModelStatus | null): void {
   activeStatus = status;
+  const state = status?.state ?? 'idle';
+  el('header-dot').className = `header-dot ${state}`;
   el('header-status').textContent = compactStatus(status);
   renderStatusCard(status);
   updateEditorHint();
@@ -125,6 +127,14 @@ function setHint(text: string): void {
 function hideResult(): void {
   el('editor-result').hidden = true;
   lastCorrected = '';
+}
+
+function updateEditorControls(): void {
+  const input = el<HTMLTextAreaElement>('editor-input');
+  const length = input.value.length;
+  el('editor-count').textContent = `${length} character${length === 1 ? '' : 's'}`;
+  el<HTMLButtonElement>('editor-correct').disabled = inFlight || !input.value.trim();
+  el<HTMLButtonElement>('editor-clear').disabled = length === 0;
 }
 
 function updateEditorHint(): void {
@@ -182,6 +192,7 @@ function renderResult(text: string, corrections: Correction[]): void {
 async function correctNow(text: string): Promise<void> {
   const seq = ++editorSeq;
   inFlight = true;
+  updateEditorControls();
   updateEditorHint();
 
   let result: CheckResult;
@@ -195,6 +206,7 @@ async function correctNow(text: string): Promise<void> {
   } catch {
     if (seq === editorSeq) {
       inFlight = false;
+      updateEditorControls();
       setHint('Something went wrong. Try again.');
     }
     return;
@@ -202,6 +214,7 @@ async function correctNow(text: string): Promise<void> {
 
   if (seq !== editorSeq) return;
   inFlight = false;
+  updateEditorControls();
   // Only render if the input still matches what we corrected.
   if (el<HTMLTextAreaElement>('editor-input').value !== text) return;
   if (result.error) {
@@ -219,6 +232,7 @@ function runEditorCorrect(): void {
     inFlight = false;
     hideResult();
     setHint('');
+    updateEditorControls();
     return;
   }
   void correctNow(text);
@@ -262,17 +276,22 @@ async function copyResult(): Promise<void> {
 
 function wireEditor(): void {
   const input = el<HTMLTextAreaElement>('editor-input');
-  input.addEventListener('input', () => scheduleEditorCorrect());
+  input.addEventListener('input', () => {
+    updateEditorControls();
+    scheduleEditorCorrect();
+  });
   el<HTMLButtonElement>('editor-correct').addEventListener('click', () => runEditorCorrect());
   el<HTMLButtonElement>('editor-clear').addEventListener('click', () => {
     input.value = '';
     hideResult();
     setHint('');
+    updateEditorControls();
     input.focus();
   });
   el<HTMLButtonElement>('editor-copy').addEventListener('click', () => void copyResult());
   el<HTMLButtonElement>('editor-use').addEventListener('click', () => {
     input.value = lastCorrected;
+    updateEditorControls();
     input.focus();
     runEditorCorrect();
   });
@@ -283,6 +302,7 @@ function wireEditor(): void {
       runEditorCorrect();
     }
   });
+  updateEditorControls();
 }
 
 // ============================ Tabs ============================
@@ -341,7 +361,7 @@ function renderControls(): void {
 
   const modelSelect = el<HTMLSelectElement>('model-select');
   if (modelSelect.options.length === 0) {
-    modelSelect.add(new Option('Automatic (recommended)', AUTO_MODEL));
+    modelSelect.add(new Option('Recommended for this device', AUTO_MODEL));
     for (const preset of MODEL_PRESETS) modelSelect.add(new Option(preset.label, preset.id));
   }
   modelSelect.value = settings.model;
@@ -355,7 +375,7 @@ type AiAvailability = LanguageModelAvailability | 'unsupported';
 let aiAvailability: AiAvailability | null = null;
 
 const BACKEND_DESC: Record<Settings['backend'], string> = {
-  auto: "Uses Chrome's built-in AI when available, otherwise a local model.",
+  auto: "Uses Chrome's built-in AI only when ready, otherwise the local model.",
   prompt: "Uses Chrome's built-in Gemini Nano, which Chrome may download during setup.",
   transformers: 'Runs a downloaded local model in supported Chromium browsers.',
 };
@@ -380,7 +400,7 @@ function renderEngineBadge(backend: Settings['backend']): void {
     return;
   }
   const map: Record<AiAvailability, { text: string; cls: string }> = {
-    available: { text: '⚡ Chrome AI ready', cls: 'ok' },
+    available: { text: 'Chrome AI ready', cls: 'ok' },
     downloadable: { text: 'Set up Chrome AI →', cls: 'warn' },
     downloading: { text: 'Downloading Chrome AI…', cls: 'warn' },
     unavailable: { text: 'Chrome AI unavailable', cls: 'muted' },
@@ -530,6 +550,7 @@ async function consumePendingCorrection(): Promise<boolean> {
   activateTab('editor');
   const input = el<HTMLTextAreaElement>('editor-input');
   input.value = text;
+  updateEditorControls();
   input.focus();
   runEditorCorrect();
   return true;

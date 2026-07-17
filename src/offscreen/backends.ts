@@ -18,6 +18,36 @@ import {
   markModelDownloadStarted,
 } from '../shared/model-cache';
 
+interface BrowserGpu {
+  requestAdapter(options?: Record<string, unknown>): Promise<object | null>;
+}
+
+function gpuApi(): BrowserGpu | undefined {
+  return (navigator as Navigator & { gpu?: BrowserGpu }).gpu;
+}
+
+// Chromium currently ignores powerPreference on Windows and logs a warning for
+// every adapter request. Preserve all useful ONNX options while dropping only
+// that ignored field at the native boundary.
+function suppressIgnoredWindowsPowerPreference(): void {
+  if (!navigator.userAgent.includes('Windows')) return;
+  const gpu = gpuApi();
+  if (!gpu) return;
+  const requestAdapter = gpu.requestAdapter.bind(gpu);
+  Object.defineProperty(gpu, 'requestAdapter', {
+    configurable: true,
+    writable: true,
+    value: (options?: Record<string, unknown>): Promise<object | null> => {
+      if (!options || !Object.hasOwn(options, 'powerPreference')) return requestAdapter(options);
+      const supportedOptions = { ...options };
+      delete supportedOptions.powerPreference;
+      return requestAdapter(supportedOptions);
+    },
+  });
+}
+
+suppressIgnoredWindowsPowerPreference();
+
 const log = createLogger('backend');
 
 // ---- Configure Transformers.js for the extension environment (once) ----
@@ -30,6 +60,11 @@ if (onnxWasm) {
   onnxWasm.numThreads = 1;
   onnxWasm.proxy = false;
 }
+const onnxWebGPU = env.backends?.onnx?.webgpu as
+  { adapter?: object; powerPreference?: 'low-power' | 'high-performance' } | undefined;
+if (onnxWebGPU) onnxWebGPU.powerPreference = undefined;
+
+let webGPUAdapter: object | null | undefined;
 
 type Device = ModelStatus['device'];
 
@@ -47,6 +82,14 @@ export interface Backend {
   /** Returns the raw model output for one sentence (cleanup happens in the Corrector). */
   generate(sentence: string): Promise<string>;
   dispose(): Promise<void>;
+}
+
+/** Expected capability miss while Automatic tries its next ready backend. */
+export class BackendNotReadyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BackendNotReadyError';
+  }
 }
 
 // =====================================================================
@@ -72,11 +115,18 @@ const createPipeline = pipeline as unknown as (
 ) => Promise<TextGenerator>;
 
 export async function detectWebGPU(): Promise<boolean> {
+  if (webGPUAdapter !== undefined) return webGPUAdapter !== null;
   try {
-    const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
-    if (!gpu) return false;
-    return Boolean(await gpu.requestAdapter());
+    const gpu = gpuApi();
+    if (!gpu) {
+      webGPUAdapter = null;
+      return false;
+    }
+    webGPUAdapter = (await gpu.requestAdapter()) ?? null;
+    if (webGPUAdapter && onnxWebGPU) onnxWebGPU.adapter = webGPUAdapter;
+    return webGPUAdapter !== null;
   } catch {
+    webGPUAdapter = null;
     return false;
   }
 }
@@ -215,6 +265,10 @@ async function buildPipeline(
   dtype: DTypeConfig,
   onRaw: (raw: RawProgress) => void,
 ): Promise<TextGenerator> {
+  if (device === 'webgpu' && onnxWebGPU) {
+    onnxWebGPU.powerPreference = undefined;
+    if (webGPUAdapter) onnxWebGPU.adapter = webGPUAdapter;
+  }
   const progress_callback = (raw: unknown): void => onRaw(raw as RawProgress);
   log.info(`Loading ${preset.modelId} on ${device} (${dtypeLabel(dtype)}).`);
   return createPipeline(preset.task, preset.modelId, { device, dtype, progress_callback });
@@ -358,16 +412,15 @@ export class PromptApiBackend implements Backend {
     // missing output language logs a warning and can lower quality).
     const languageOptions = promptApiLanguageOptions(config.language);
     const availability = await lm.availability(languageOptions);
+    if (availability !== 'available' && config.backend === 'auto') {
+      throw new BackendNotReadyError('Chrome built-in AI is not ready; using the local model.');
+    }
     if (availability === 'unavailable') {
       throw new Error('Chrome built-in AI is unavailable on this device.');
     }
     // The offscreen document has no user gesture, so a not-yet-downloaded model
     // can't be fetched here. In `auto` mode, defer to Transformers.js until the
     // user sets it up from the Options page (a real user-gesture context).
-    if (availability !== 'available' && config.backend === 'auto') {
-      throw new Error('Chrome built-in AI model is not downloaded yet.');
-    }
-
     const params = await lm.params().catch(() => null);
     const tuning = params ? { topK: 1, temperature: params.defaultTemperature } : {};
     this.createOptions = { initialPrompts: buildInitialPrompts(), ...languageOptions, ...tuning };

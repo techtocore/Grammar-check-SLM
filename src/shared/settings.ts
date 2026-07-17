@@ -38,7 +38,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   enabled: true,
-  backend: 'auto',
+  backend: 'transformers',
   model: AUTO_MODEL,
   device: 'auto',
   debounceMs: 900,

@@ -65,6 +65,8 @@ export type BackgroundMessage =
   | { type: 'correct'; target: 'background'; requestId: string; text: string }
   | { type: 'settings:get'; target: 'background' }
   | { type: 'settings:set'; target: 'background'; patch: Partial<Settings> }
+  | { type: 'setup:verify'; target: 'background' }
+  | { type: 'setup:complete'; target: 'background' }
   | { type: 'site:enabled'; target: 'background'; origin: string }
   | { type: 'models:list'; target: 'background' }
   | {
@@ -110,6 +112,7 @@ export type OffscreenMessage =
 // ---- Messages addressed to a page's content script (via chrome.tabs.sendMessage) ----
 
 export type ContentMessage =
+  | { type: 'gc-ready-probe'; target: 'content' }
   | { type: 'gc-correcting'; target: 'content'; requestId: string; original: string }
   | {
       type: 'gc-correct-result';
@@ -178,6 +181,8 @@ export function isBackgroundMessage(msg: unknown): msg is BackgroundMessage {
     case 'warmup':
     case 'retry':
     case 'settings:get':
+    case 'setup:verify':
+    case 'setup:complete':
       return true;
     case 'models:list':
       return msg.device === undefined;
@@ -258,6 +263,7 @@ export function isDownloadProgress(msg: unknown): msg is DownloadProgress {
 
 export function isContentMessage(msg: unknown): msg is ContentMessage {
   if (!isRecord(msg) || msg.target !== 'content' || typeof msg.type !== 'string') return false;
+  if (msg.type === 'gc-ready-probe') return true;
   if (msg.type === 'gc-correcting') {
     return hasText(msg.requestId) && typeof msg.original === 'string';
   }
@@ -279,7 +285,14 @@ export function isAuthorizedBackgroundMessage(
   const context = senderContext(sender, extensionId);
   if (context === 'content') return message.type === 'check' || message.type === 'warmup';
   if (context === 'popup') {
-    return !['check', 'models:list', 'models:download', 'models:delete'].includes(message.type);
+    return ![
+      'check',
+      'models:list',
+      'models:download',
+      'models:delete',
+      'setup:verify',
+      'setup:complete',
+    ].includes(message.type);
   }
   if (context === 'options') {
     return !['check', 'correct', 'site:enabled', 'warmup'].includes(message.type);

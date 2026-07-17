@@ -27,6 +27,8 @@ import { setPendingCorrection, clearPendingCorrection } from '../shared/pending'
 import { applyCorrections } from '../core/corrections';
 import { createLogger } from '../shared/logger';
 import { handleFirstRunInstall } from './first-run';
+import { activateExistingTabs } from './tab-activation';
+import { assertSetupVerified, SETUP_PROBE } from './setup-verification';
 
 const log = createLogger('background');
 
@@ -82,6 +84,17 @@ async function handleCorrect(text: string, requestId: string): Promise<CheckResu
   const settings = await loadSettings();
   await ensureConfigured(settings);
   return sendToOffscreen<CheckResult>({ type: 'check', target: 'offscreen', requestId, text });
+}
+
+async function handleSetupVerify(): Promise<{
+  ok: boolean;
+  status: ModelStatus;
+  error?: string;
+}> {
+  const result = await handleCorrect(SETUP_PROBE, newRequestId());
+  const status = await handleStatus();
+  assertSetupVerified(result, status);
+  return { ok: true, status };
 }
 
 async function handleWarmup(): Promise<ModelStatus> {
@@ -409,6 +422,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse(settings);
         })
         .catch(() => sendResponse(null));
+      return true;
+    }
+    case 'setup:verify': {
+      handleSetupVerify()
+        .then(sendResponse)
+        .catch((error: unknown) =>
+          sendResponse({
+            ok: false,
+            status: lastStatus ?? {
+              state: 'error',
+              progress: 0,
+              modelId: '',
+              device: 'unknown',
+            },
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      return true;
+    }
+    case 'setup:complete': {
+      activateExistingTabs()
+        .then((activatedTabs) => sendResponse({ ok: true, activatedTabs }))
+        .catch((error: unknown) =>
+          sendResponse({
+            ok: false,
+            activatedTabs: 0,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
       return true;
     }
     case 'site:enabled': {

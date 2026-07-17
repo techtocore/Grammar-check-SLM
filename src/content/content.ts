@@ -4,6 +4,7 @@ import { FieldRegistry } from './registry';
 import { initSelectionCorrection } from './selection';
 import { onContextInvalidated } from './lifecycle';
 import { createLogger } from '../shared/logger';
+import { isBackgroundSender, isContentMessage } from '../shared/messages';
 
 const log = createLogger('content');
 
@@ -65,4 +66,27 @@ async function main(): Promise<void> {
   log.info(`Content script initialised (origin=${origin ?? 'unsupported'}).`);
 }
 
-void main();
+const contentScope = globalThis as typeof globalThis & {
+  __grammarCheckSlmStarted?: boolean;
+  __grammarCheckSlmReady?: Promise<void>;
+};
+
+if (!contentScope.__grammarCheckSlmStarted) {
+  contentScope.__grammarCheckSlmStarted = true;
+  contentScope.__grammarCheckSlmReady = main();
+  chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+    if (!isBackgroundSender(sender, chrome.runtime.id) || !isContentMessage(message)) {
+      return undefined;
+    }
+    if (message.type !== 'gc-ready-probe') return undefined;
+    contentScope.__grammarCheckSlmReady?.then(
+      () => sendResponse({ ready: true }),
+      (error: unknown) =>
+        sendResponse({
+          ready: false,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+    );
+    return true;
+  });
+}

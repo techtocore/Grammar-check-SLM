@@ -8,7 +8,12 @@ import { broadcastDownload } from '../shared/messages';
 import { getPreset, MODEL_PRESETS, resolvePreset } from '../shared/models';
 import { createLogger } from '../shared/logger';
 import { deleteModelCache } from '../shared/model-cache';
-import { downloadTransformersModel, pickBackends, type Backend } from './backends';
+import {
+  BackendNotReadyError,
+  downloadTransformersModel,
+  pickBackends,
+  type Backend,
+} from './backends';
 
 const log = createLogger('runner');
 
@@ -488,7 +493,8 @@ export class Corrector {
         return;
       } catch (error) {
         lastError = error;
-        log.warn('Backend load failed; trying the next option.', error);
+        if (error instanceof BackendNotReadyError) log.info(error.message);
+        else log.warn('Backend load failed; trying the next option.', error);
         await backend.dispose().catch(() => undefined);
       }
     }

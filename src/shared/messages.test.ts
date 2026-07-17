@@ -3,6 +3,7 @@ import {
   isAuthorizedBackgroundMessage,
   isBackgroundMessage,
   isBackgroundSender,
+  isContentMessage,
   isDownloadProgress,
   isOffscreenMessage,
   isOffscreenSender,
@@ -71,6 +72,7 @@ describe('runtime message validation', () => {
         text: '',
       }),
     ).toBe(true);
+    expect(isContentMessage({ target: 'content', type: 'gc-ready-probe' })).toBe(true);
     expect(isOffscreenMessage({ target: 'offscreen', type: 'suspend' })).toBe(true);
     expect(isOffscreenMessage({ target: 'offscreen', type: 'device:detect' })).toBe(true);
     expect(isOffscreenMessage({ target: 'offscreen', type: 'downloads:status' })).toBe(true);

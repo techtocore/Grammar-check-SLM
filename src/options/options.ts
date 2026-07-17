@@ -34,6 +34,8 @@ let setupChangeInFlight = 0;
 let setupTargetRevision = 0;
 let modelRefreshGeneration = 0;
 let lastPropagatedSetupTarget: string | null = null;
+let setupVerificationInFlight = false;
+let setupVerificationError: string | null = null;
 const downloads = new Map<
   string,
   { progress: number; state: 'downloading' | 'error'; error?: string }
@@ -427,8 +429,8 @@ function renderFirstRunSetup(): void {
     copy.textContent = `${model.label} is about ${model.approxDownloadMB} MB. It downloads once, stays on this device, and is cached for private offline checks.`;
   }
 
-  if (firstRunComplete || model?.cached) {
-    status.textContent = 'Setup complete. The local model is ready for grammar checks.';
+  if (firstRunComplete) {
+    status.textContent = 'Setup complete. Grammar checking is ready in your browser tabs.';
     bar.style.width = '100%';
     progress.setAttribute('aria-valuenow', '100');
     return;
@@ -452,6 +454,28 @@ function renderFirstRunSetup(): void {
     return;
   }
 
+  if (setupVerificationInFlight) {
+    status.textContent = 'Model downloaded. Running a test grammar check...';
+    bar.style.width = '100%';
+    progress.setAttribute('aria-valuenow', '100');
+    return;
+  }
+
+  if (setupVerificationError) {
+    status.textContent = `Test grammar check failed: ${setupVerificationError}`;
+    progress.hidden = true;
+    action.textContent = 'Retry verification';
+    action.hidden = false;
+    return;
+  }
+
+  if (model.cached) {
+    status.textContent = 'Model downloaded. Preparing a test grammar check...';
+    bar.style.width = '100%';
+    progress.setAttribute('aria-valuenow', '100');
+    return;
+  }
+
   const percent = download?.state === 'downloading' ? download.progress : 0;
   status.textContent =
     download?.state === 'downloading'
@@ -461,15 +485,49 @@ function renderFirstRunSetup(): void {
   progress.setAttribute('aria-valuenow', String(percent));
 }
 
-function finishFirstRunSetup(): void {
+async function finishFirstRunSetup(): Promise<void> {
   if (firstRunComplete || setupChangeInFlight > 0) return;
+  const activation = await sendToBackground<{ ok: boolean; error?: string }>({
+    type: 'setup:complete',
+    target: 'background',
+  });
+  if (!activation.ok) {
+    throw new Error(activation.error ?? 'Existing tabs could not be activated.');
+  }
+  await completeFirstRunSetup();
   firstRunComplete = true;
+  removeFirstRunQuery();
   renderFirstRunSetup();
-  void completeFirstRunSetup()
-    .then(removeFirstRunQuery)
-    .catch((error: unknown) =>
-      showPageError('The model is ready, but setup completion could not be saved.', error),
-    );
+}
+
+async function verifyFirstRunSetup(model: ModelInfo): Promise<void> {
+  if (setupVerificationInFlight || firstRunComplete || setupChangeInFlight > 0) return;
+  const targetRevision = setupTargetRevision;
+  const targetKey = setupTargetKey(model);
+  setupVerificationInFlight = true;
+  setupVerificationError = null;
+  renderFirstRunSetup();
+  try {
+    const response = await sendToBackground<{ ok: boolean; error?: string }>({
+      type: 'setup:verify',
+      target: 'background',
+    });
+    const currentModel = firstRunModel();
+    if (
+      targetRevision !== setupTargetRevision ||
+      !currentModel ||
+      setupTargetKey(currentModel) !== targetKey
+    ) {
+      return;
+    }
+    if (!response.ok) throw new Error(response.error ?? 'The test grammar check failed.');
+    await finishFirstRunSetup();
+  } catch (error) {
+    setupVerificationError = errorMessage(error);
+  } finally {
+    setupVerificationInFlight = false;
+    renderFirstRunSetup();
+  }
 }
 
 async function beginFirstRunSetup(): Promise<void> {
@@ -525,7 +583,7 @@ async function beginFirstRunSetup(): Promise<void> {
     lastPropagatedSetupTarget = targetKey;
   }
   if (model.cached) {
-    finishFirstRunSetup();
+    await verifyFirstRunSetup(model);
     return;
   }
 
@@ -543,6 +601,7 @@ async function retryFirstRunSetup(): Promise<void> {
     const model = firstRunModel();
     if (!model) throw new Error('The local model catalogue is unavailable.');
     lastPropagatedSetupTarget = null;
+    setupVerificationError = null;
     downloads.delete(model.modelId);
     await beginFirstRunSetup();
   } catch (error) {
@@ -676,7 +735,7 @@ function initBuiltinAi(): void {
 
 function modelDescription(id: string): string {
   if (id === AUTO_MODEL) {
-    return 'Uses Qwen3.5 0.8B with WebGPU, or Qwen3 0.6B when only WASM is available.';
+    return 'Chooses Qwen3.5 0.8B with WebGPU, or Qwen3 0.6B when WASM is required.';
   }
   const preset = getPreset(id);
   if (!preset) return '';
@@ -688,9 +747,9 @@ function backendDescription(backend: Settings['backend']): string {
     return "Uses Chrome's built-in Gemini Nano. Chrome may download it during one-time setup. Requires a supported Chrome build.";
   }
   if (backend === 'transformers') {
-    return 'Runs a downloaded Transformers.js model locally in supported Chromium browsers.';
+    return 'Uses the on-device model prepared during setup. This is the default for reliable checking.';
   }
-  return "Prefers Chrome's built-in AI when available, and falls back to the local model below otherwise.";
+  return "Uses Chrome's built-in AI only when it is ready; otherwise uses the local model below.";
 }
 
 function render(): void {
@@ -708,7 +767,7 @@ function render(): void {
 
   const modelSelect = el<HTMLSelectElement>('model');
   if (modelSelect.options.length === 0) {
-    modelSelect.add(new Option('Automatic (recommended)', AUTO_MODEL));
+    modelSelect.add(new Option('Recommended for this device', AUTO_MODEL));
     for (const preset of MODEL_PRESETS) modelSelect.add(new Option(preset.label, preset.id));
   }
   modelSelect.value = settings.model;

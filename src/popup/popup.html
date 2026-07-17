@@ -12,9 +12,12 @@
         <img class="logo" src="icons/icon48.png" alt="" />
         <div class="titles">
           <h1>Grammar Check</h1>
-          <p class="subtitle" id="header-status" role="status" aria-live="polite">
-            Private · on-device AI
-          </p>
+          <div class="status-line">
+            <span class="header-dot idle" id="header-dot" aria-hidden="true"></span>
+            <p class="subtitle" id="header-status" role="status" aria-live="polite">
+              Private · on-device AI
+            </p>
+          </div>
         </div>
         <button
           class="icon-btn"
@@ -57,11 +60,14 @@
       <!-- ===== Editor ===== -->
       <section class="panel" id="panel-editor" role="tabpanel" aria-labelledby="tab-editor">
         <div class="editor">
-          <label class="sr-only" for="editor-input">Text to correct</label>
+          <div class="editor-heading">
+            <label for="editor-input">Text to check</label>
+            <span id="editor-count">0 characters</span>
+          </div>
           <textarea
             id="editor-input"
             class="editor-input"
-            placeholder="Type or paste a sentence or paragraph to correct…"
+            placeholder="Type or paste text to check"
             spellcheck="false"
             autocomplete="off"
           ></textarea>
@@ -69,8 +75,17 @@
           <div class="editor-bar">
             <span class="editor-hint" id="editor-hint" role="status" aria-live="polite"></span>
             <div class="editor-buttons">
-              <button class="btn ghost" id="editor-clear" type="button">Clear</button>
-              <button class="btn primary" id="editor-correct" type="button">Correct</button>
+              <button class="btn ghost" id="editor-clear" type="button" disabled>Clear</button>
+              <button
+                class="btn primary"
+                id="editor-correct"
+                type="button"
+                aria-keyshortcuts="Control+Enter Meta+Enter"
+                title="Correct now (Ctrl+Enter)"
+                disabled
+              >
+                Correct
+              </button>
             </div>
           </div>
 
@@ -78,7 +93,9 @@
             <div class="result-head">
               <span class="result-count" id="result-count" role="status" aria-live="polite"></span>
               <div class="result-actions">
-                <button class="btn ghost small" id="editor-use" type="button" hidden>Use ↑</button>
+                <button class="btn ghost small" id="editor-use" type="button" hidden>
+                  Use result
+                </button>
                 <button class="btn primary small" id="editor-copy" type="button">Copy</button>
               </div>
             </div>
@@ -134,10 +151,10 @@
             </div>
             <div class="segmented" id="engine-seg" role="radiogroup" aria-label="AI engine">
               <button class="seg" data-backend="auto" type="button" role="radio" tabindex="0">
-                <span class="seg-emoji" aria-hidden="true">✨</span>Automatic
+                Automatic
               </button>
               <button class="seg" data-backend="prompt" type="button" role="radio" tabindex="-1">
-                <span class="seg-emoji" aria-hidden="true">⚡</span>Chrome&nbsp;AI
+                Chrome&nbsp;AI
               </button>
               <button
                 class="seg"
@@ -146,7 +163,7 @@
                 role="radio"
                 tabindex="-1"
               >
-                <span class="seg-emoji" aria-hidden="true">💻</span>Local
+                Local
               </button>
             </div>
             <p class="engine-desc" id="engine-desc"></p>

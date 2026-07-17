@@ -36,6 +36,14 @@ function installStorage(initial: Partial<Settings> = {}): {
 describe('settings normalization', () => {
   beforeEach(() => vi.unstubAllGlobals());
 
+  it('uses the local engine prepared by first-run setup by default', () => {
+    expect(DEFAULT_SETTINGS).toMatchObject({
+      backend: 'transformers',
+      model: 'auto',
+      device: 'auto',
+    });
+  });
+
   it('validates enums, numbers, models, and language tags', () => {
     expect(
       normalizeSettings({

@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelStatus, RunnerConfig } from '../shared/messages';
 import type { Backend, LoadedBackend } from './backends';
 import { Corrector } from './corrector';
-import { downloadTransformersModel } from './backends';
+import { BackendNotReadyError, downloadTransformersModel } from './backends';
 import { deleteModelCache } from '../shared/model-cache';
 
 vi.mock('./backends', () => ({
+  BackendNotReadyError: class BackendNotReadyError extends Error {},
   downloadTransformersModel: vi.fn(),
   pickBackends: vi.fn(),
 }));
@@ -58,6 +59,23 @@ describe('Corrector', () => {
     await corrector.setConfig(CONFIG);
 
     await expect(corrector.correct('This sentence have enough words.')).resolves.not.toEqual([]);
+  });
+
+  it('quietly falls back to the local backend when Chrome AI is not ready', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const builtIn = fakeBackend(
+      vi.fn(() => Promise.resolve('text')),
+      'built-in',
+      undefined,
+      vi.fn(() => Promise.reject(new BackendNotReadyError('Chrome AI is not ready'))),
+    );
+    const local = fakeBackend(vi.fn(() => Promise.resolve('text')));
+    const corrector = new Corrector(vi.fn(), () => [() => builtIn, () => local]);
+    await corrector.setConfig({ ...CONFIG, backend: 'auto' });
+
+    await expect(corrector.warmup()).resolves.toBeUndefined();
+    expect(corrector.getStatus()).toMatchObject({ state: 'ready', device: 'wasm' });
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('clears stale error metadata after a successful retry', async () => {
