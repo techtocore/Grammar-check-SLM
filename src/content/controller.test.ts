@@ -88,7 +88,7 @@ describe('FieldController', () => {
     const controller = new FieldController(adapter, DEFAULT_SETTINGS, tooltip);
     expect(vi.getTimerCount()).toBe(1);
 
-    controller.updateSettings({ ...DEFAULT_SETTINGS, model: 'qwen3-1.7b' });
+    controller.updateSettings({ ...DEFAULT_SETTINGS, model: 'qwen3.5-0.8b' });
     expect(vi.getTimerCount()).toBe(0);
     vi.runAllTimers();
     expect(sendMessage).not.toHaveBeenCalled();

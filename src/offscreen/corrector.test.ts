@@ -180,7 +180,9 @@ describe('Corrector', () => {
       hasMatchingRunnerLoading: true,
       hasObsoleteRunnerLoading: false,
     });
-    expect(corrector.selectOnboardingTarget('Xenova/flan-t5-base', 'wasm')).toMatchObject({
+    expect(
+      corrector.selectOnboardingTarget('onnx-community/Qwen3.5-0.8B-ONNX', 'wasm'),
+    ).toMatchObject({
       hasMatchingRunnerLoading: false,
       hasObsoleteRunnerLoading: true,
     });
@@ -255,18 +257,22 @@ describe('Corrector', () => {
     const first = corrector.downloadModel('onnx-community/Qwen3-0.6B-ONNX', 'wasm', 'onboarding');
     await vi.waitFor(() => expect(download).toHaveBeenCalledOnce());
     const superseded = corrector.downloadModel(
-      'onnx-community/Qwen3-1.7B-ONNX',
+      'onnx-community/Qwen3.5-0.8B-ONNX',
       'wasm',
       'onboarding',
     );
-    const latest = corrector.downloadModel('Xenova/flan-t5-base', 'wasm', 'onboarding');
+    const latest = corrector.downloadModel(
+      'onnx-community/Qwen3.5-0.8B-ONNX',
+      'webgpu',
+      'onboarding',
+    );
 
     finishFirst?.();
     await Promise.all([first, superseded, latest]);
 
     expect(download.mock.calls.map(([preset]) => preset.modelId)).toEqual([
       'onnx-community/Qwen3-0.6B-ONNX',
-      'Xenova/flan-t5-base',
+      'onnx-community/Qwen3.5-0.8B-ONNX',
     ]);
     expect(corrector.getDownloadStatuses()).toEqual([]);
   });
@@ -287,7 +293,11 @@ describe('Corrector', () => {
 
     const first = corrector.downloadModel('onnx-community/Qwen3-0.6B-ONNX', 'wasm', 'onboarding');
     await vi.waitFor(() => expect(download).toHaveBeenCalledOnce());
-    const queued = corrector.downloadModel('onnx-community/Qwen3-1.7B-ONNX', 'wasm', 'onboarding');
+    const queued = corrector.downloadModel(
+      'onnx-community/Qwen3.5-0.8B-ONNX',
+      'wasm',
+      'onboarding',
+    );
     expect(corrector.selectOnboardingTarget('onnx-community/Qwen3-0.6B-ONNX', 'wasm')).toEqual({
       hasMatchingRunning: true,
       hasObsoleteRunning: false,
@@ -314,7 +324,7 @@ describe('Corrector', () => {
     let finishBlocker: (() => void) | undefined;
     const download = vi.mocked(downloadTransformersModel);
     download.mockImplementation((preset) => {
-      if (preset.modelId === 'Xenova/flan-t5-base') {
+      if (preset.modelId === 'onnx-community/Qwen3-0.6B-ONNX') {
         return new Promise<void>((resolve) => {
           finishBlocker = resolve;
         });
@@ -323,11 +333,11 @@ describe('Corrector', () => {
     });
     const corrector = new Corrector(vi.fn());
 
-    const blocker = corrector.downloadModel('Xenova/flan-t5-base', 'wasm');
+    const blocker = corrector.downloadModel('onnx-community/Qwen3-0.6B-ONNX', 'wasm');
     await vi.waitFor(() => expect(download).toHaveBeenCalledOnce());
-    const wasm = corrector.downloadModel('onnx-community/Qwen3-0.6B-ONNX', 'wasm', 'onboarding');
+    const wasm = corrector.downloadModel('onnx-community/Qwen3.5-0.8B-ONNX', 'wasm', 'onboarding');
     const webgpu = corrector.downloadModel(
-      'onnx-community/Qwen3-0.6B-ONNX',
+      'onnx-community/Qwen3.5-0.8B-ONNX',
       'webgpu',
       'onboarding',
     );
@@ -337,8 +347,8 @@ describe('Corrector', () => {
     expect(
       download.mock.calls.map(([preset, _onProgress, device]) => [preset.modelId, device]),
     ).toEqual([
-      ['Xenova/flan-t5-base', 'wasm'],
-      ['onnx-community/Qwen3-0.6B-ONNX', 'webgpu'],
+      ['onnx-community/Qwen3-0.6B-ONNX', 'wasm'],
+      ['onnx-community/Qwen3.5-0.8B-ONNX', 'webgpu'],
     ]);
   });
 

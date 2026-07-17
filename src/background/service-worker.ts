@@ -21,7 +21,7 @@ import {
   setSiteEnabled,
   type Settings,
 } from '../shared/settings';
-import { MODEL_PRESETS } from '../shared/models';
+import { MODEL_PRESETS, resolvePreset } from '../shared/models';
 import { listModelCacheInfo } from '../shared/model-cache';
 import { setPendingCorrection, clearPendingCorrection } from '../shared/pending';
 import { applyCorrections } from '../core/corrections';
@@ -184,7 +184,7 @@ async function handleModelsList(): Promise<ModelInfo[]> {
   ]);
   const downloadsByModel = new Map(downloadStatuses.map((status) => [status.modelId, status]));
   const localActive = settings.backend !== 'prompt';
-  const activeModel = settings.model === 'auto' ? 'qwen3-0.6b' : settings.model;
+  const activeModel = resolvePreset(settings.model, cachePreference !== 'wasm').id;
   return MODEL_PRESETS.map((preset) => ({
     id: preset.id,
     modelId: preset.modelId,

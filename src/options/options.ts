@@ -203,7 +203,7 @@ function renderModels(): void {
     const desc = document.createElement('div');
     desc.className = 'model-desc';
     desc.textContent = `${model.description} · ~${model.approxDownloadMB} MB${
-      model.requiresWebGPU ? ' · WebGPU recommended' : ''
+      model.requiresWebGPU ? ' · WebGPU required' : ''
     }`;
     info.append(title, desc);
 
@@ -388,7 +388,7 @@ function firstRunModel(): ModelInfo | undefined {
   const existing = models.find((model) => model.modelId === firstRunModelId);
   if (existing) return existing;
 
-  const target = active ?? models.find((model) => model.id === 'qwen3-0.6b') ?? models[0];
+  const target = active ?? models[0];
   firstRunModelId = target?.modelId ?? null;
   return target;
 }
@@ -676,7 +676,7 @@ function initBuiltinAi(): void {
 
 function modelDescription(id: string): string {
   if (id === AUTO_MODEL) {
-    return 'Uses the recommended Qwen3 0.6B model — fast and reliable on most devices.';
+    return 'Uses Qwen3.5 0.8B with WebGPU, or Qwen3 0.6B when only WASM is available.';
   }
   const preset = getPreset(id);
   if (!preset) return '';
@@ -738,9 +738,14 @@ function wire(): void {
   el<HTMLSelectElement>('model').addEventListener('change', (e) =>
     saveFromUi({ model: (e.target as HTMLSelectElement).value }),
   );
-  el<HTMLSelectElement>('device').addEventListener('change', (e) =>
-    saveFromUi({ device: (e.target as HTMLSelectElement).value as Settings['device'] }),
-  );
+  el<HTMLSelectElement>('device').addEventListener('change', (e) => {
+    const device = (e.target as HTMLSelectElement).value as Settings['device'];
+    const selectedPreset = settings ? getPreset(settings.model) : undefined;
+    saveFromUi({
+      device,
+      ...(device === 'wasm' && selectedPreset?.requiresWebGPU ? { model: AUTO_MODEL } : {}),
+    });
+  });
   el<HTMLInputElement>('language').addEventListener('change', (e) =>
     saveFromUi({ language: (e.target as HTMLInputElement).value.trim() || 'en' }),
   );

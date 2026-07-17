@@ -1,10 +1,10 @@
-// Model catalogue. The newest Transformers.js-verified text-generation models
-// are the Qwen3 family (onnx-community, library_name: transformers.js). A legacy
-// FLAN-T5 option is kept for maximum compatibility / lowest-end devices.
+// Model catalogue. Keep one current general-purpose model and one low-memory
+// fallback, both published as browser-ready ONNX builds by onnx-community.
 
 export type ModelTask = 'text-generation' | 'text2text-generation';
 export type DevicePreference = 'auto' | 'webgpu' | 'wasm';
 export type DType = 'auto' | 'fp32' | 'fp16' | 'q8' | 'q4' | 'q4f16';
+export type DTypeConfig = DType | Readonly<Record<string, DType>>;
 
 export interface ModelPreset {
   /** Stable preset key stored in settings. */
@@ -16,10 +16,8 @@ export interface ModelPreset {
   task: ModelTask;
   approxDownloadMB: number;
   /** Recommended quantization per backend. */
-  dtype: { webgpu: DType; wasm: DType };
-  /** Qwen3 models emit <think> reasoning traces; disable thinking when true. */
-  reasoning?: boolean;
-  /** Suggested only when WebGPU is available (large models). */
+  dtype: { webgpu: DTypeConfig; wasm: DTypeConfig };
+  /** The model cannot run on the bundled WASM execution provider. */
   requiresWebGPU?: boolean;
 }
 
@@ -27,34 +25,30 @@ export const AUTO_MODEL = 'auto';
 
 export const MODEL_PRESETS: readonly ModelPreset[] = [
   {
-    id: 'qwen3-0.6b',
-    modelId: 'onnx-community/Qwen3-0.6B-ONNX',
-    label: 'Qwen3 0.6B · Recommended',
-    description: 'Newest small LLM. Fast and reliable; loads on most devices.',
+    id: 'qwen3.5-0.8b',
+    modelId: 'onnx-community/Qwen3.5-0.8B-ONNX',
+    label: 'Qwen3.5 0.8B · Recommended',
+    description: 'Latest balanced model for modern devices with WebGPU.',
     task: 'text-generation',
-    approxDownloadMB: 550,
-    dtype: { webgpu: 'q4f16', wasm: 'q8' },
-    reasoning: true,
-  },
-  {
-    id: 'qwen3-1.7b',
-    modelId: 'onnx-community/Qwen3-1.7B-ONNX',
-    label: 'Qwen3 1.7B · Higher quality',
-    description: 'Stronger corrections, but needs ~2 GB of free memory and WebGPU.',
-    task: 'text-generation',
-    approxDownloadMB: 1400,
-    dtype: { webgpu: 'q4f16', wasm: 'q4' },
-    reasoning: true,
+    approxDownloadMB: 1000,
+    dtype: {
+      webgpu: {
+        embed_tokens: 'fp16',
+        vision_encoder: 'fp16',
+        decoder_model_merged: 'q4',
+      },
+      wasm: 'q4',
+    },
     requiresWebGPU: true,
   },
   {
-    id: 'flan-t5-base',
-    modelId: 'Xenova/flan-t5-base',
-    label: 'FLAN-T5 Base · Compatibility',
-    description: 'Lightweight legacy model. Works everywhere; lower quality.',
-    task: 'text2text-generation',
-    approxDownloadMB: 250,
-    dtype: { webgpu: 'fp16', wasm: 'q8' },
+    id: 'qwen3-0.6b',
+    modelId: 'onnx-community/Qwen3-0.6B-ONNX',
+    label: 'Qwen3 0.6B · Low memory',
+    description: 'Smaller fallback for older or memory-constrained devices.',
+    task: 'text-generation',
+    approxDownloadMB: 550,
+    dtype: { webgpu: 'q4f16', wasm: 'q8' },
   },
 ];
 
@@ -62,10 +56,10 @@ export function getPreset(id: string): ModelPreset | undefined {
   return MODEL_PRESETS.find((preset) => preset.id === id);
 }
 
-/** Best default preset. Uses the small, reliable model that loads on the widest
- * range of hardware; larger models are opt-in via Settings. */
-export function defaultPresetForDevice(_hasWebGPU: boolean): ModelPreset {
-  return getPreset('qwen3-0.6b') ?? MODEL_PRESETS[0]!;
+/** Uses the newest practical model on WebGPU and the smaller model on WASM. */
+export function defaultPresetForDevice(hasWebGPU: boolean): ModelPreset {
+  const id = hasWebGPU ? 'qwen3.5-0.8b' : 'qwen3-0.6b';
+  return getPreset(id) ?? MODEL_PRESETS[0]!;
 }
 
 /**
@@ -74,5 +68,9 @@ export function defaultPresetForDevice(_hasWebGPU: boolean): ModelPreset {
  */
 export function resolvePreset(modelSetting: string, hasWebGPU: boolean): ModelPreset {
   if (modelSetting === AUTO_MODEL) return defaultPresetForDevice(hasWebGPU);
-  return getPreset(modelSetting) ?? defaultPresetForDevice(hasWebGPU);
+  const preset = getPreset(modelSetting);
+  if (!preset || (preset.requiresWebGPU && !hasWebGPU)) {
+    return defaultPresetForDevice(hasWebGPU);
+  }
+  return preset;
 }

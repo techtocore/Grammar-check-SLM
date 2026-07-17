@@ -6,6 +6,7 @@ import {
   resolvePreset,
   MODEL_PRESETS,
   type DType,
+  type DTypeConfig,
   type ModelPreset,
 } from '../shared/models';
 import type { ModelStatus, RunnerConfig } from '../shared/messages';
@@ -89,12 +90,14 @@ function deviceCandidates(pref: RunnerConfig['device'], hasWebGPU: boolean): ('w
 async function orderedDeviceCandidates(
   pref: RunnerConfig['device'],
   hasWebGPU: boolean,
-  modelId: string,
+  preset: ModelPreset,
 ): Promise<('webgpu' | 'wasm')[]> {
-  const candidates = deviceCandidates(pref, hasWebGPU);
+  const candidates = deviceCandidates(pref, hasWebGPU).filter(
+    (device) => !preset.requiresWebGPU || device === 'webgpu',
+  );
   if (pref !== 'auto') return candidates;
   const completed = new Set(
-    await getCompletedModelDevices(modelId).catch((error: unknown) => {
+    await getCompletedModelDevices(preset.modelId).catch((error: unknown) => {
       log.warn('Could not inspect cached model backends.', error);
       return [];
     }),
@@ -105,13 +108,15 @@ async function orderedDeviceCandidates(
   ];
 }
 
-function dtypeCandidates(preset: ModelPreset, device: 'webgpu' | 'wasm'): DType[] {
+function dtypeCandidates(preset: ModelPreset, device: 'webgpu' | 'wasm'): DTypeConfig[] {
+  const preferred = preset.dtype[device];
+  if (typeof preferred !== 'string') return [preferred];
   if (preset.task === 'text2text-generation') {
-    return [...new Set<DType>([preset.dtype[device], device === 'webgpu' ? 'fp16' : 'q8', 'q8'])];
+    return [...new Set<DType>([preferred, device === 'webgpu' ? 'fp16' : 'q8', 'q8'])];
   }
   // Causal LMs can be large — only try memory-frugal quantizations (never fp16/fp32).
   const fallbacks: DType[] = device === 'webgpu' ? ['q4f16', 'q4', 'q8'] : ['q4', 'q8'];
-  return [...new Set<DType>([preset.dtype[device], ...fallbacks])];
+  return [...new Set<DType>([preferred, ...fallbacks])];
 }
 
 /** Whether an error looks like an out-of-memory / allocation failure. */
@@ -135,13 +140,18 @@ const DTYPE_MEMORY_RANK: Record<DType, number> = {
   q4: 4,
 };
 
-function hasSmallerCandidate(candidates: readonly DType[], index: number): boolean {
+function dtypeMemoryRank(dtype: DTypeConfig): number {
+  if (typeof dtype === 'string') return DTYPE_MEMORY_RANK[dtype];
+  return Math.max(...Object.values(dtype).map((component) => DTYPE_MEMORY_RANK[component]));
+}
+
+function hasSmallerCandidate(candidates: readonly DTypeConfig[], index: number): boolean {
   const current = candidates[index];
   return (
     current !== undefined &&
     candidates
       .slice(index + 1)
-      .some((candidate) => DTYPE_MEMORY_RANK[candidate] < DTYPE_MEMORY_RANK[current])
+      .some((candidate) => dtypeMemoryRank(candidate) < dtypeMemoryRank(current))
   );
 }
 
@@ -195,14 +205,18 @@ function extractText(out: GenerationOutputItem[]): string {
   return '';
 }
 
+function dtypeLabel(dtype: DTypeConfig): string {
+  return typeof dtype === 'string' ? dtype : JSON.stringify(dtype);
+}
+
 async function buildPipeline(
   preset: ModelPreset,
   device: 'webgpu' | 'wasm',
-  dtype: DType,
+  dtype: DTypeConfig,
   onRaw: (raw: RawProgress) => void,
 ): Promise<TextGenerator> {
   const progress_callback = (raw: unknown): void => onRaw(raw as RawProgress);
-  log.info(`Loading ${preset.modelId} on ${device} (${dtype}).`);
+  log.info(`Loading ${preset.modelId} on ${device} (${dtypeLabel(dtype)}).`);
   return createPipeline(preset.task, preset.modelId, { device, dtype, progress_callback });
 }
 
@@ -215,8 +229,8 @@ export class TransformersBackend implements Backend {
     if (config.device === 'webgpu' && !hasWebGPU) {
       throw new Error('WebGPU is not available on this device.');
     }
-    const preset = resolvePreset(config.model, hasWebGPU);
-    const devices = await orderedDeviceCandidates(config.device, hasWebGPU, preset.modelId);
+    const preset = resolvePreset(config.model, hasWebGPU && config.device !== 'wasm');
+    const devices = await orderedDeviceCandidates(config.device, hasWebGPU, preset);
     await markModelDownloadStarted(preset.modelId, config.device);
     const expectedBytes = preset.approxDownloadMB * 1024 * 1024;
     let lastError: unknown = new Error('No backend available');
@@ -239,7 +253,7 @@ export class TransformersBackend implements Backend {
           return { label: preset.label, modelId: preset.modelId, device };
         } catch (error) {
           lastError = error;
-          log.warn(`Load failed on ${device}/${dtype}.`, error);
+          log.warn(`Load failed on ${device}/${dtypeLabel(dtype)}.`, error);
           if (isMemoryError(error) && !hasSmallerCandidate(dtypes, index)) break;
         }
       }
@@ -295,7 +309,10 @@ export async function downloadTransformersModel(
   if (devicePreference === 'webgpu' && !hasWebGPU) {
     throw new Error('WebGPU is not available on this device.');
   }
-  const devices = await orderedDeviceCandidates(devicePreference, hasWebGPU, preset.modelId);
+  if (preset.requiresWebGPU && (devicePreference === 'wasm' || !hasWebGPU)) {
+    throw new Error(`${preset.label} requires WebGPU.`);
+  }
+  const devices = await orderedDeviceCandidates(devicePreference, hasWebGPU, preset);
   await markModelDownloadStarted(preset.modelId, devicePreference);
   const expectedBytes = preset.approxDownloadMB * 1024 * 1024;
   let lastError: unknown = new Error('No backend available');
@@ -313,7 +330,7 @@ export async function downloadTransformersModel(
         return;
       } catch (error) {
         lastError = error;
-        log.warn(`Download failed on ${device}/${dtype}.`, error);
+        log.warn(`Download failed on ${device}/${dtypeLabel(dtype)}.`, error);
         if (isMemoryError(error) && !hasSmallerCandidate(dtypes, index)) break;
       }
     }

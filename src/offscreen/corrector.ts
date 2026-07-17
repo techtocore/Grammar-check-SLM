@@ -5,7 +5,7 @@ import { LRUCache } from '../core/cache';
 import type { Correction, Sentence } from '../core/types';
 import type { ModelDownloadStatus, ModelStatus, RunnerConfig } from '../shared/messages';
 import { broadcastDownload } from '../shared/messages';
-import { getPreset, MODEL_PRESETS } from '../shared/models';
+import { getPreset, MODEL_PRESETS, resolvePreset } from '../shared/models';
 import { createLogger } from '../shared/logger';
 import { deleteModelCache } from '../shared/model-cache';
 import { downloadTransformersModel, pickBackends, type Backend } from './backends';
@@ -405,17 +405,12 @@ export class Corrector {
     if (this.status.state !== 'loading' || this.status.device === 'built-in') return 'none';
     const config = this.config;
     if (!config || config.backend === 'prompt') return 'none';
-    const configuredModel =
-      this.status.modelId ||
-      (config.model === 'auto'
-        ? MODEL_PRESETS.find((preset) => preset.id === 'qwen3-0.6b')?.modelId
-        : getPreset(config.model)?.modelId);
-    if (!configuredModel) return 'none';
-
     const concreteDevice =
       this.status.device === 'webgpu' || this.status.device === 'wasm'
         ? this.status.device
         : config.device;
+    const configuredModel =
+      this.status.modelId || resolvePreset(config.model, concreteDevice !== 'wasm').modelId;
     const deviceMatches =
       device === 'auto' ||
       concreteDevice === device ||

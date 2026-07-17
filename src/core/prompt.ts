@@ -37,7 +37,7 @@ export function buildMessages(sentence: string): ChatMessage[] {
   ];
 }
 
-/** Builds the plain-text prompt for a text2text model (e.g. FLAN-T5). */
+/** Builds the plain-text prompt for an encoder-decoder text2text model. */
 export function buildT5Prompt(sentence: string): string {
   return `Fix the grammar and spelling of this sentence: ${sentence}`;
 }

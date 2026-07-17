@@ -6,9 +6,9 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen)
 
 A privacy-first Chromium extension that fixes grammar and spelling **entirely on your device**. It
-uses Chrome's **built-in AI (Gemini Nano)** when available and falls back to a downloaded **Qwen3**
-model via [Transformers.js](https://github.com/huggingface/transformers.js). Edited text is never
-uploaded; local model weights download once on first use and are then cached for offline use.
+uses Chrome's **built-in AI (Gemini Nano)** when available and falls back to a downloaded
+**Qwen** model via [Transformers.js](https://github.com/huggingface/transformers.js). Edited text is
+never uploaded; local model weights download once on first use and are then cached for offline use.
 
 ![Extension pop-up and suggested corrections](/assets/extension.png)
 
@@ -17,8 +17,8 @@ uploaded; local model weights download once on first use and are then cached for
 - 🔒 **Truly private corrections** — every check runs locally; edited text is never uploaded.
 - ⚡ **Chrome built-in AI first** — uses the **Prompt API (Gemini Nano)** when available. Chrome
   manages its one-time setup/download and shares the model across the browser.
-- 🤖 **Local SLM fallback** — Alibaba's **Qwen3 0.6B** (default) or **1.7B** via Transformers.js,
-  **WebGPU**-accelerated with a WASM fallback. FLAN-T5 is available for maximum compatibility.
+- 🤖 **Local SLM fallback** — **Qwen3.5 0.8B** on WebGPU, with **Qwen3 0.6B** selected
+  automatically for WASM and memory-constrained devices.
 - ✒️ **Real-world fields** — rich-text (`contenteditable`) **and** `<textarea>` / `<input>`.
 - 🎯 **Precise fixes** — a word-level **LCS diff** maps each correction to an exact text range, and
   **sentence-aware** checking (`Intl.Segmenter`) with caching never re-processes unchanged text.
@@ -35,7 +35,7 @@ uploaded; local model weights download once on first use and are then cached for
 ```
 Content script  ──check──▶  Service worker  ──config──▶  Offscreen document
   field adapters             message router              Prompt API (Gemini Nano)
-  highlighter                settings + menus            Transformers.js (Qwen3)
+  highlighter                settings + menus            Transformers.js (Qwen3.5 / Qwen3)
   tooltip                    offscreen lifecycle         WebGPU / WASM · LRU cache
        ◀─────────────────  corrections  ───────────────────────
 ```
@@ -76,11 +76,11 @@ npm run build      # production build into ./build
 > or serve the file over HTTP (e.g. `npx serve .` then open `http://localhost:3000/test.html`).
 
 On first installation, the extension opens Settings and immediately downloads the recommended local
-model (about 550 MB), with visible progress and retry guidance. The model stays on the device and is
-cached for offline use, so the first grammar check does not unexpectedly start a large download.
-Chrome built-in AI can also be set up from Settings when supported. Wavy underlines appear once the
-selected engine is ready. Open the page's DevTools console for `[GrammarSLM:content]` logs to confirm
-checks are running.
+model (about 1 GB with WebGPU or 550 MB with WASM), with visible progress and retry guidance. The
+model stays on the device and is cached for offline use, so the first grammar check does not
+unexpectedly start a large download. Chrome built-in AI can also be set up from Settings when
+supported. Wavy underlines appear once the selected engine is ready. Open the page's DevTools
+console for `[GrammarSLM:content]` logs to confirm checks are running.
 
 ## ⚙️ Configuration
 
@@ -89,7 +89,7 @@ Open the extension's **Settings** page (or the ⚙ button in the popup) to confi
 | Setting      | Description                                                                  |
 | ------------ | ---------------------------------------------------------------------------- |
 | AI engine    | `Automatic` (Chrome AI, else local), `Chrome AI` only, or `Local` model only |
-| Local model  | Fallback model: `Automatic`, Qwen3 0.6B / 1.7B, or FLAN-T5 Base              |
+| Local model  | Fallback model: `Automatic`, Qwen3.5 0.8B, or Qwen3 0.6B                     |
 | Acceleration | `Automatic` (WebGPU → WASM), WebGPU only, or WASM only (local models)        |
 | Language     | BCP-47 locale used for sentence segmentation                                 |
 | Typing delay | Debounce before a check runs                                                 |
@@ -105,10 +105,11 @@ result for read-only text).
 - **Chrome built-in AI (Prompt API / Gemini Nano)** — the default when your Chrome build supports it.
   Chrome manages the model and shares it across the browser. The Settings page has a one-time **“Set
   up”** button when Chrome needs to download it.
-- **Local models (Transformers.js)** — the fallback. `Automatic` uses the recommended **Qwen3 0.6B**
-  (loads reliably on the widest range of hardware); **Qwen3 1.7B** is opt-in for higher quality, and
-  **FLAN-T5 Base** is a lightweight compatibility option. All are `onnx-community/*-ONNX` builds. The
-  catalogue lives in [`src/shared/models.ts`](src/shared/models.ts).
+- **Local models (Transformers.js)** — the fallback. `Automatic` uses **Qwen3.5 0.8B** when WebGPU
+  is available and **Qwen3 0.6B** on the WASM backend. Qwen3.5 uses a verified mixed-precision
+  configuration and requires WebGPU; Qwen3 0.6B remains the smaller choice for older or
+  memory-constrained devices. Both use browser-ready `onnx-community` builds. The catalogue lives in
+  [`src/shared/models.ts`](src/shared/models.ts).
 
 ## 🧪 Development
 
@@ -127,7 +128,7 @@ offset↔DOM mapping are covered by unit tests under `src/**/*.test.ts`.
 
 - TypeScript · Webpack 5 · Chrome Extension Manifest V3 (offscreen document)
 - Chrome built-in AI **Prompt API** (Gemini Nano) with a Transformers.js fallback
-- Transformers.js (ONNX Runtime Web) with WebGPU + WASM · Qwen3 SLMs
+- Transformers.js (ONNX Runtime Web) with WebGPU + WASM · Qwen3.5 / Qwen3 SLMs
 - `Intl.Segmenter` · CSS Custom Highlight API
 - Vitest · ESLint · Prettier
 
