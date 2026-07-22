@@ -53,6 +53,28 @@ body {
   padding: 12px;
 }
 
+body.expanded-view {
+  width: auto;
+  min-width: 0;
+  min-height: 100vh;
+}
+
+body.expanded-view .app {
+  width: min(100%, 960px);
+  min-height: 100vh;
+  padding: 24px;
+  margin: 0 auto;
+}
+
+body.expanded-view .editor-input {
+  min-height: min(52vh, 520px);
+  max-height: none;
+}
+
+body.expanded-view .result-body {
+  max-height: none;
+}
+
 /* ---------- Header ---------- */
 
 .header {
@@ -79,6 +101,12 @@ body {
   margin: 0;
   font-size: 15px;
   font-weight: 680;
+}
+
+.header-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
 }
 
 .status-line {
@@ -125,8 +153,11 @@ body {
 
 .icon-btn {
   appearance: none;
+  display: inline-grid;
+  place-items: center;
   width: 32px;
   height: 32px;
+  padding: 0;
   flex-shrink: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -137,6 +168,17 @@ body {
   transition:
     background 0.15s ease,
     color 0.15s ease;
+}
+
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vertical-align: middle;
 }
 
 .icon-btn:hover {
@@ -219,6 +261,23 @@ textarea:focus-visible {
   color: var(--text-muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+.editor-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+}
+
+#editor-save-status[data-state='error'] {
+  color: var(--danger);
+  font-weight: 650;
+}
+
+.editor-meta-separator {
+  opacity: 0.7;
 }
 
 .editor-input {
@@ -800,5 +859,11 @@ textarea:focus-visible {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  @media (max-width: 600px) {
+    body.expanded-view .app {
+      padding: 12px;
+    }
   }
 }

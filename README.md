@@ -25,8 +25,8 @@ weights download once during setup and are then cached for offline use.
   **sentence-aware** checking (`Intl.Segmenter`) with caching never re-processes unchanged text.
 - 🎨 **No caret jumps** — non-destructive **CSS Custom Highlight API** for rich text, a positioned
   overlay for inputs.
-- ✍️ **Built-in editor** — paste a sentence or paragraph into the popup for an instant diff view and
-  one-click **copy**.
+- ✍️ **Built-in editor** — paste a sentence or paragraph for an instant diff view, automatic local
+  draft recovery, a full-page editing mode, and one-click **copy**.
 - 🖱️ **Right-click to correct** — select text anywhere to fix it in place, or copy the corrected
   version for read-only text.
 - 🛠️ **Configurable** — engine, model, acceleration, typing delay, fields, and per-site rules.

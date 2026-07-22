@@ -10,6 +10,7 @@ import { isSiteEnabled, originOf, setSiteEnabled, type Settings } from '../share
 import { AUTO_MODEL, MODEL_PRESETS } from '../shared/models';
 import { promptApiLanguageOptions } from '../shared/prompt-language';
 import { takePendingCorrection } from '../shared/pending';
+import { clearEditorDraft, loadEditorDraft, saveEditorDraft } from '../shared/editor-draft';
 import { applyCorrections, type Correction } from '../core';
 
 function el<T extends HTMLElement>(id: string): T {
@@ -27,6 +28,11 @@ let editorSeq = 0;
 let editorTimer: number | null = null;
 let inFlight = false;
 let lastCorrected = '';
+let lastCorrections: Correction[] | null = null;
+let draftSaveSeq = 0;
+
+const pageUrl = new URL(window.location.href);
+const expandedView = pageUrl.searchParams.get('view') === 'expanded';
 
 const STATUS_TEXT: Record<ModelStatus['state'], string> = {
   idle: 'Idle — loads on first use',
@@ -114,19 +120,53 @@ function reportPopupError(context: string, error: unknown): void {
     modelId: 'popup',
     device: 'unknown',
     message: context,
-    error: error instanceof Error ? error.message : String(error),
+    error: errorMessage(error),
   });
 }
 
 // ============================ Editor ============================
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function setHint(text: string): void {
   el('editor-hint').textContent = text;
+}
+
+function setDraftStatus(text: string, state: 'normal' | 'error' = 'normal', detail = ''): void {
+  const status = el('editor-save-status');
+  status.textContent = text;
+  status.dataset.state = state;
+  status.title = detail
+    ? `Drafts are stored only on this device. ${detail}`
+    : 'Drafts are stored only on this device.';
 }
 
 function hideResult(): void {
   el('editor-result').hidden = true;
   lastCorrected = '';
+  lastCorrections = null;
+}
+
+async function persistEditorState(): Promise<boolean> {
+  const seq = ++draftSaveSeq;
+  const text = el<HTMLTextAreaElement>('editor-input').value;
+  try {
+    if (text.length === 0) {
+      await clearEditorDraft();
+    } else {
+      await saveEditorDraft({
+        text,
+        ...(lastCorrections === null ? {} : { corrections: lastCorrections }),
+      });
+    }
+    if (seq === draftSaveSeq) setDraftStatus(text.length === 0 ? 'Cleared' : 'Saved');
+    return true;
+  } catch (error) {
+    if (seq === draftSaveSeq) setDraftStatus('Not saved', 'error', errorMessage(error));
+    return false;
+  }
 }
 
 function updateEditorControls(): void {
@@ -164,7 +204,8 @@ function buildDiff(text: string, corrections: readonly Correction[]): DiffPart[]
   return parts;
 }
 
-function renderResult(text: string, corrections: Correction[]): void {
+function renderResult(text: string, corrections: Correction[], persist = true): void {
+  lastCorrections = corrections.map((correction) => ({ ...correction }));
   lastCorrected = applyCorrections(text, corrections);
   const count = corrections.length;
 
@@ -187,6 +228,7 @@ function renderResult(text: string, corrections: Correction[]): void {
   el<HTMLButtonElement>('editor-use').hidden = count === 0;
   el('editor-result').hidden = false;
   setHint('');
+  if (persist) void persistEditorState();
 }
 
 async function correctNow(text: string): Promise<void> {
@@ -274,26 +316,64 @@ async function copyResult(): Promise<void> {
   }
 }
 
+async function openExpandedEditor(): Promise<void> {
+  const button = el<HTMLButtonElement>('open-editor-page');
+  button.disabled = true;
+  if (!(await persistEditorState())) {
+    button.disabled = false;
+    return;
+  }
+
+  const url = new URL(chrome.runtime.getURL('popup.html'));
+  url.searchParams.set('view', 'expanded');
+  if (origin) url.searchParams.set('origin', origin);
+  try {
+    await chrome.tabs.create({ url: url.toString(), active: true });
+  } catch (error) {
+    setHint(`Could not open the full-page editor: ${errorMessage(error)}`);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function wireEditor(): void {
   const input = el<HTMLTextAreaElement>('editor-input');
   input.addEventListener('input', () => {
+    editorSeq++;
+    inFlight = false;
+    hideResult();
+    setHint('');
     updateEditorControls();
+    void persistEditorState();
     scheduleEditorCorrect();
   });
   el<HTMLButtonElement>('editor-correct').addEventListener('click', () => runEditorCorrect());
   el<HTMLButtonElement>('editor-clear').addEventListener('click', () => {
+    if (editorTimer !== null) clearTimeout(editorTimer);
+    editorTimer = null;
+    editorSeq++;
+    inFlight = false;
     input.value = '';
     hideResult();
     setHint('');
     updateEditorControls();
+    void persistEditorState();
     input.focus();
   });
   el<HTMLButtonElement>('editor-copy').addEventListener('click', () => void copyResult());
   el<HTMLButtonElement>('editor-use').addEventListener('click', () => {
-    input.value = lastCorrected;
+    const corrected = lastCorrected;
+    editorSeq++;
+    inFlight = false;
+    input.value = corrected;
+    hideResult();
     updateEditorControls();
+    void persistEditorState();
     input.focus();
     runEditorCorrect();
+  });
+  el<HTMLButtonElement>('open-editor-page').addEventListener('click', () => {
+    void openExpandedEditor();
   });
   // Ctrl/Cmd+Enter to correct immediately.
   input.addEventListener('keydown', (e) => {
@@ -552,17 +632,51 @@ async function consumePendingCorrection(): Promise<boolean> {
   input.value = text;
   updateEditorControls();
   input.focus();
+  await persistEditorState();
   runEditorCorrect();
   return true;
 }
 
+async function restoreEditorDraft(): Promise<{ restored: boolean; hasResult: boolean }> {
+  let draft: Awaited<ReturnType<typeof loadEditorDraft>>;
+  try {
+    draft = await loadEditorDraft();
+  } catch (error) {
+    setDraftStatus('Unavailable', 'error', errorMessage(error));
+    return { restored: false, hasResult: false };
+  }
+  if (!draft) return { restored: false, hasResult: false };
+
+  const input = el<HTMLTextAreaElement>('editor-input');
+  input.value = draft.text;
+  hideResult();
+  updateEditorControls();
+  if (draft.corrections !== undefined) renderResult(draft.text, draft.corrections, false);
+  setDraftStatus('Restored');
+  return { restored: true, hasResult: draft.corrections !== undefined };
+}
+
 async function init(): Promise<void> {
+  document.body.classList.toggle('expanded-view', expandedView);
+  el<HTMLButtonElement>('open-editor-page').hidden = expandedView;
+  if (expandedView) {
+    document.title = 'Grammar Check Editor';
+    el('app-title').textContent = 'Grammar Check Editor';
+  }
+
   wireTabs();
   wireEditor();
   wireControls();
 
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  origin = originOf(tab?.url);
+  const requestedOrigin = expandedView
+    ? originOf(pageUrl.searchParams.get('origin') ?? undefined)
+    : null;
+  if (requestedOrigin) {
+    origin = requestedOrigin;
+  } else {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    origin = originOf(tab?.url);
+  }
   settings = await sendToBackground<Settings | null>({
     type: 'settings:get',
     target: 'background',
@@ -585,9 +699,15 @@ async function init(): Promise<void> {
   );
 
   // A pending selection (from the context menu) takes over the editor; otherwise
-  // just focus the empty input.
+  // restore the durable draft and resume an unfinished automatic check.
   if (!(await consumePendingCorrection())) {
-    el<HTMLTextAreaElement>('editor-input').focus();
+    const restored = await restoreEditorDraft();
+    const input = el<HTMLTextAreaElement>('editor-input');
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    if (restored.restored && !restored.hasResult) {
+      scheduleEditorCorrect(expandedView ? 250 : 700);
+    }
   }
 }
 

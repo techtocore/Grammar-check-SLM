@@ -147,8 +147,13 @@ describe('runtime sender authorization', () => {
 
   it('allows only the intended extension UI operations', () => {
     const popup = sender(`chrome-extension://${EXTENSION_ID}/popup.html`);
+    const expanded = sender(
+      `chrome-extension://${EXTENSION_ID}/popup.html?view=expanded&origin=https%3A%2F%2Fexample.com`,
+      true,
+    );
     const options = sender(`chrome-extension://${EXTENSION_ID}/options.html`, true);
     expect(isAuthorizedBackgroundMessage(settings, popup, EXTENSION_ID)).toBe(true);
+    expect(isAuthorizedBackgroundMessage(settings, expanded, EXTENSION_ID)).toBe(true);
     expect(isAuthorizedBackgroundMessage(check, popup, EXTENSION_ID)).toBe(false);
     expect(isAuthorizedBackgroundMessage(deleteModel, options, EXTENSION_ID)).toBe(true);
     expect(isAuthorizedBackgroundMessage(check, options, EXTENSION_ID)).toBe(false);
