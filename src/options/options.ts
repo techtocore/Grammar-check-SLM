@@ -6,7 +6,7 @@ import {
   type ModelInfo,
   type ModelStatus,
 } from '../shared/messages';
-import type { Settings } from '../shared/settings';
+import { onSettingsChanged, runnerSettingsKey, type Settings } from '../shared/settings';
 import { AUTO_MODEL, getPreset, MODEL_PRESETS } from '../shared/models';
 import { promptApiLanguageOptions } from '../shared/prompt-language';
 import {
@@ -23,6 +23,7 @@ function el<T extends HTMLElement>(id: string): T {
 }
 
 let settings: Settings | null = null;
+let settingsChangeGeneration = 0;
 let savedTimer: number | null = null;
 let models: ModelInfo[] = [];
 let activeStatus: ModelStatus | null = null;
@@ -68,6 +69,7 @@ function flashSaved(): void {
 }
 
 async function save(patch: Partial<Settings>): Promise<void> {
+  const settingsGeneration = settingsChangeGeneration;
   const changesSetupTarget = firstRunVisible && ('model' in patch || 'device' in patch);
   if (changesSetupTarget) {
     setupChangeInFlight++;
@@ -88,7 +90,7 @@ async function save(patch: Partial<Settings>): Promise<void> {
       patch,
     });
     if (!next) throw new Error('The extension did not return updated settings.');
-    settings = next;
+    if (settingsGeneration === settingsChangeGeneration) settings = next;
   } finally {
     if (changesSetupTarget) setupChangeInFlight--;
   }
@@ -908,6 +910,26 @@ async function init(): Promise<void> {
   if (!loaded) throw new Error('The extension did not return its settings.');
   settings = loaded;
   render();
+  onSettingsChanged((next) => {
+    settingsChangeGeneration++;
+    const runnerChanged =
+      settings !== null && runnerSettingsKey(settings) !== runnerSettingsKey(next);
+    settings = next;
+    render();
+    if (runnerChanged) {
+      void refreshModels().catch((error: unknown) =>
+        showPageError('The model list could not be refreshed after a settings change.', error),
+      );
+      void sendToBackground<ModelStatus | null>({ type: 'status', target: 'background' })
+        .then((status) => {
+          activeStatus = status;
+          renderModelStatus();
+        })
+        .catch((error: unknown) =>
+          showPageError('Model status could not be refreshed after a settings change.', error),
+        );
+    }
+  });
   wire();
   initBuiltinAi();
   try {

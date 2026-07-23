@@ -1,6 +1,6 @@
 # Privacy Policy — Grammar Check SLM
 
-**Last updated: July 12, 2026**
+**Last updated: July 22, 2026**
 
 Grammar Check SLM ("the extension") is a privacy-first browser extension that
 checks and corrects grammar, spelling, and punctuation **entirely on your own
@@ -25,14 +25,27 @@ When grammar checking is enabled for a site, the extension reads the text you
 type or paste into editable fields (rich-text editors, `<textarea>`, and text
 `<input>` elements) so it can check it. This text is processed **only in
 memory, on your device**, and is passed to an on-device language model to
-produce corrections. It is:
+produce corrections. Text read from website fields is:
 
 - **Never** sent to the developer.
 - **Never** sent to any third-party server for correction.
-- **Never** stored persistently. A bounded in-memory cache of recent results is
-  kept only to avoid re-checking unchanged sentences. It can remain while the
-  offscreen model runner is active and is cleared when the runner is disabled,
-  reconfigured, closed, or the browser session ends.
+- **Never** stored persistently by automatic website checking. A bounded
+  in-memory cache of recent results is kept only to avoid re-checking unchanged
+  sentences. It can remain while the offscreen model runner is active and is
+  cleared when the runner is disabled, reconfigured, closed, or the browser
+  session ends.
+
+### Built-in editor drafts
+
+Text that you deliberately type or paste into the extension's built-in editor
+is automatically saved in `chrome.storage.local`, together with its matching
+correction result when available. This prevents an accidental popup dismissal
+from losing your work and lets the popup and full-page editor resume the same
+draft. The draft:
+
+- Stays only on this device and is never synced or transmitted.
+- Is replaced as you continue editing.
+- Is cleared when you click **Clear** in the editor or uninstall the extension.
 
 ### Settings
 
@@ -71,6 +84,8 @@ read-only text. It never reads your clipboard.
   required to use WebGPU/WASM from a Manifest V3 extension.
 - **`contextMenus`** — provide the right-click "Correct grammar of…" action and
   the per-site toggle.
+- **`scripting`** — activate the bundled content script in eligible tabs that
+  were already open when first-time setup finishes.
 - **`activeTab`** — read the current tab's address in the popup so it can show
   and toggle checking for the site you are on.
 - **`clipboardWrite`** — copy corrected text to your clipboard when you ask.

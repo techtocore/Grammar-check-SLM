@@ -6,11 +6,18 @@ import {
   type CheckResult,
   type ModelStatus,
 } from '../shared/messages';
-import { isSiteEnabled, originOf, setSiteEnabled, type Settings } from '../shared/settings';
+import {
+  isSiteEnabled,
+  onSettingsChanged,
+  originOf,
+  runnerSettingsKey,
+  setSiteEnabled,
+  type Settings,
+} from '../shared/settings';
 import { AUTO_MODEL, MODEL_PRESETS } from '../shared/models';
 import { promptApiLanguageOptions } from '../shared/prompt-language';
-import { takePendingCorrection } from '../shared/pending';
-import { clearEditorDraft, loadEditorDraft, saveEditorDraft } from '../shared/editor-draft';
+import type { PendingCorrection } from '../shared/pending';
+import type { EditorDraft } from '../shared/editor-draft';
 import { applyCorrections, type Correction } from '../core';
 
 function el<T extends HTMLElement>(id: string): T {
@@ -20,6 +27,7 @@ function el<T extends HTMLElement>(id: string): T {
 }
 
 let settings: Settings | null = null;
+let settingsChangeGeneration = 0;
 let origin: string | null = null;
 let activeStatus: ModelStatus | null = null;
 
@@ -27,9 +35,15 @@ let activeStatus: ModelStatus | null = null;
 let editorSeq = 0;
 let editorTimer: number | null = null;
 let inFlight = false;
+let editorTouched = false;
 let lastCorrected = '';
 let lastCorrections: Correction[] | null = null;
+let lastResultConfigKey: string | null = null;
 let draftSaveSeq = 0;
+let lastDraftRevision = 0;
+let currentTextRevision: number | null = null;
+let currentDraftSave: Promise<DraftSaveOutcome> | null = null;
+const draftSourceId = crypto.randomUUID();
 
 const pageUrl = new URL(window.location.href);
 const expandedView = pageUrl.searchParams.get('view') === 'expanded';
@@ -147,25 +161,121 @@ function hideResult(): void {
   el('editor-result').hidden = true;
   lastCorrected = '';
   lastCorrections = null;
+  lastResultConfigKey = null;
 }
 
-async function persistEditorState(): Promise<boolean> {
+function nextDraftRevision(): number {
+  lastDraftRevision = Math.max(Date.now(), lastDraftRevision + 1);
+  return lastDraftRevision;
+}
+
+interface DraftSaveOutcome {
+  saved: boolean;
+  revision: number;
+}
+
+function persistEditorState(): Promise<DraftSaveOutcome> {
   const seq = ++draftSaveSeq;
+  const revision = nextDraftRevision();
   const text = el<HTMLTextAreaElement>('editor-input').value;
-  try {
-    if (text.length === 0) {
-      await clearEditorDraft();
-    } else {
-      await saveEditorDraft({
-        text,
-        ...(lastCorrections === null ? {} : { corrections: lastCorrections }),
-      });
+  currentTextRevision = revision;
+  const operation = (async (): Promise<DraftSaveOutcome> => {
+    try {
+      let response: { ok: boolean; applied?: boolean; revision?: number; error?: string };
+      if (text.length === 0) {
+        response = await sendToBackground({
+          type: 'editor:draft:clear',
+          target: 'background',
+          sourceId: draftSourceId,
+          sequence: seq,
+          revision,
+        });
+      } else {
+        const draft: EditorDraft = {
+          text,
+          ...(lastCorrections === null || lastResultConfigKey === null
+            ? {}
+            : { corrections: lastCorrections, configKey: lastResultConfigKey }),
+        };
+        response = await sendToBackground({
+          type: 'editor:draft:save',
+          target: 'background',
+          sourceId: draftSourceId,
+          sequence: seq,
+          revision,
+          draft,
+        });
+      }
+      if (!response.ok) throw new Error(response.error ?? 'The draft could not be saved.');
+      if (response.revision !== undefined) {
+        lastDraftRevision = Math.max(lastDraftRevision, response.revision);
+      }
+      if (!response.applied) {
+        if (seq === draftSaveSeq) {
+          currentTextRevision = null;
+          currentDraftSave = null;
+          setDraftStatus('Changed elsewhere', 'error', 'A newer editor draft is already saved.');
+        }
+        return { saved: false, revision };
+      }
+      if (seq === draftSaveSeq) setDraftStatus(text.length === 0 ? 'Cleared' : 'Saved');
+      return { saved: true, revision };
+    } catch (error) {
+      if (seq === draftSaveSeq) {
+        currentTextRevision = null;
+        currentDraftSave = null;
+        setDraftStatus('Not saved', 'error', errorMessage(error));
+      }
+      return { saved: false, revision };
     }
-    if (seq === draftSaveSeq) setDraftStatus(text.length === 0 ? 'Cleared' : 'Saved');
-    return true;
+  })();
+  currentDraftSave = operation;
+  return operation;
+}
+
+async function savedRevisionFor(text: string): Promise<number | undefined> {
+  const revision = currentTextRevision;
+  const saving = currentDraftSave;
+  if (revision === null || !saving) return undefined;
+  const outcome = await saving;
+  if (
+    !outcome.saved ||
+    currentTextRevision !== revision ||
+    el<HTMLTextAreaElement>('editor-input').value !== text
+  ) {
+    return undefined;
+  }
+  return revision;
+}
+
+async function persistEditorResult(
+  text: string,
+  corrections: Correction[],
+  baseRevision: number,
+  configKey: string,
+): Promise<void> {
+  try {
+    const response = await sendToBackground<{
+      ok: boolean;
+      applied?: boolean;
+      error?: string;
+    }>({
+      type: 'editor:draft:result',
+      target: 'background',
+      baseRevision,
+      text,
+      corrections,
+      configKey,
+    });
+    if (!response.ok)
+      throw new Error(response.error ?? 'The correction result could not be saved.');
+    if (!response.applied && el<HTMLTextAreaElement>('editor-input').value === text) {
+      setDraftStatus('Changed elsewhere', 'error', 'A newer editor draft is already saved.');
+    }
   } catch (error) {
-    if (seq === draftSaveSeq) setDraftStatus('Not saved', 'error', errorMessage(error));
-    return false;
+    if (el<HTMLTextAreaElement>('editor-input').value === text) {
+      setDraftStatus('Result not saved', 'error', errorMessage(error));
+    }
   }
 }
 
@@ -204,8 +314,14 @@ function buildDiff(text: string, corrections: readonly Correction[]): DiffPart[]
   return parts;
 }
 
-function renderResult(text: string, corrections: Correction[], persist = true): void {
+function renderResult(
+  text: string,
+  corrections: Correction[],
+  configKey?: string,
+  baseRevision?: number,
+): void {
   lastCorrections = corrections.map((correction) => ({ ...correction }));
+  lastResultConfigKey = configKey ?? null;
   lastCorrected = applyCorrections(text, corrections);
   const count = corrections.length;
 
@@ -228,7 +344,9 @@ function renderResult(text: string, corrections: Correction[], persist = true): 
   el<HTMLButtonElement>('editor-use').hidden = count === 0;
   el('editor-result').hidden = false;
   setHint('');
-  if (persist) void persistEditorState();
+  if (baseRevision !== undefined && configKey !== undefined) {
+    void persistEditorResult(text, lastCorrections, baseRevision, configKey);
+  }
 }
 
 async function correctNow(text: string): Promise<void> {
@@ -237,20 +355,46 @@ async function correctNow(text: string): Promise<void> {
   updateEditorControls();
   updateEditorHint();
 
-  let result: CheckResult;
+  const baseRevision = await savedRevisionFor(text);
+  if (seq !== editorSeq || el<HTMLTextAreaElement>('editor-input').value !== text) return;
+  const corrections: Correction[] = [];
+  let startOffset = 0;
+  let configKey: string | undefined;
+  let configRestarts = 0;
   try {
-    result = await sendToBackground<CheckResult>({
-      type: 'correct',
-      target: 'background',
-      requestId: newRequestId(),
-      text,
-    });
-  } catch {
-    if (seq === editorSeq) {
-      inFlight = false;
-      updateEditorControls();
-      setHint('Something went wrong. Try again.');
+    while (true) {
+      const result = await sendToBackground<CheckResult>({
+        type: 'correct',
+        target: 'background',
+        requestId: newRequestId(),
+        text,
+        startOffset,
+        configKey,
+      });
+      if (seq !== editorSeq || el<HTMLTextAreaElement>('editor-input').value !== text) return;
+      if (result.configurationChanged) {
+        if (++configRestarts > 3) throw new Error('Grammar-check settings kept changing.');
+        corrections.length = 0;
+        startOffset = 0;
+        configKey = result.configKey;
+        setHint('Engine changed. Restarting check…');
+        continue;
+      }
+      configKey = result.configKey ?? configKey;
+      if (result.error) throw new Error(result.error);
+      corrections.push(...result.corrections);
+      if (result.complete) break;
+      if (result.nextOffset <= startOffset) {
+        throw new Error('The grammar checker did not advance through the text.');
+      }
+      startOffset = result.nextOffset;
+      setHint(`Checking… ${Math.min(99, Math.round((startOffset / text.length) * 100))}%`);
     }
+  } catch (error) {
+    if (seq !== editorSeq) return;
+    inFlight = false;
+    updateEditorControls();
+    setHint(errorMessage(error) || 'Something went wrong. Try again.');
     return;
   }
 
@@ -259,11 +403,7 @@ async function correctNow(text: string): Promise<void> {
   updateEditorControls();
   // Only render if the input still matches what we corrected.
   if (el<HTMLTextAreaElement>('editor-input').value !== text) return;
-  if (result.error) {
-    setHint(result.error);
-    return;
-  }
-  renderResult(text, result.corrections);
+  renderResult(text, corrections, configKey, baseRevision);
 }
 
 function runEditorCorrect(): void {
@@ -319,7 +459,7 @@ async function copyResult(): Promise<void> {
 async function openExpandedEditor(): Promise<void> {
   const button = el<HTMLButtonElement>('open-editor-page');
   button.disabled = true;
-  if (!(await persistEditorState())) {
+  if (!(await persistEditorState()).saved) {
     button.disabled = false;
     return;
   }
@@ -339,6 +479,7 @@ async function openExpandedEditor(): Promise<void> {
 function wireEditor(): void {
   const input = el<HTMLTextAreaElement>('editor-input');
   input.addEventListener('input', () => {
+    editorTouched = true;
     editorSeq++;
     inFlight = false;
     hideResult();
@@ -349,6 +490,7 @@ function wireEditor(): void {
   });
   el<HTMLButtonElement>('editor-correct').addEventListener('click', () => runEditorCorrect());
   el<HTMLButtonElement>('editor-clear').addEventListener('click', () => {
+    editorTouched = true;
     if (editorTimer !== null) clearTimeout(editorTimer);
     editorTimer = null;
     editorSeq++;
@@ -362,6 +504,7 @@ function wireEditor(): void {
   });
   el<HTMLButtonElement>('editor-copy').addEventListener('click', () => void copyResult());
   el<HTMLButtonElement>('editor-use').addEventListener('click', () => {
+    editorTouched = true;
     const corrected = lastCorrected;
     editorSeq++;
     inFlight = false;
@@ -529,14 +672,17 @@ async function loadAiAvailability(): Promise<void> {
 }
 
 async function updateSettings(patch: Partial<Settings>): Promise<void> {
+  const generation = settingsChangeGeneration;
   const next = await sendToBackground<Settings | null>({
     type: 'settings:set',
     target: 'background',
     patch,
   });
   if (!next) throw new Error('The extension did not return updated settings.');
-  settings = next;
-  renderControls();
+  if (generation === settingsChangeGeneration) {
+    settings = next;
+    renderControls();
+  }
   try {
     renderStatus(
       await sendToBackground<ModelStatus | null>({ type: 'status', target: 'background' }),
@@ -546,10 +692,37 @@ async function updateSettings(patch: Partial<Settings>): Promise<void> {
   }
 }
 
+const EDITOR_RUNNER_SETTINGS: ReadonlySet<keyof Settings> = new Set([
+  'backend',
+  'model',
+  'device',
+  'language',
+]);
+
+function invalidateEditorForRunnerChange(): boolean {
+  const input = el<HTMLTextAreaElement>('editor-input');
+  if (editorTimer !== null) clearTimeout(editorTimer);
+  editorTimer = null;
+  editorSeq++;
+  inFlight = false;
+  hideResult();
+  updateEditorControls();
+  const hasText = Boolean(input.value.trim());
+  setHint(hasText ? 'Engine changed. Restarting check…' : '');
+  return hasText;
+}
+
 function updateSettingsFromUi(patch: Partial<Settings>): void {
-  void updateSettings(patch).catch((error: unknown) =>
-    reportPopupError('Settings could not be saved.', error),
-  );
+  const restartEditor =
+    Object.keys(patch).some((key) => EDITOR_RUNNER_SETTINGS.has(key as keyof Settings)) &&
+    invalidateEditorForRunnerChange();
+  void updateSettings(patch)
+    .catch((error: unknown) => reportPopupError('Settings could not be saved.', error))
+    .finally(() => {
+      if (restartEditor && el<HTMLTextAreaElement>('editor-input').value.trim()) {
+        scheduleEditorCorrect(150);
+      }
+    });
 }
 
 function openOptionsPage(): void {
@@ -618,14 +791,25 @@ function wireControls(): void {
  * correct it right away. Returns true when a pending selection was handled.
  */
 async function consumePendingCorrection(): Promise<boolean> {
-  let pending: Awaited<ReturnType<typeof takePendingCorrection>>;
+  let pending: PendingCorrection | null;
   try {
-    pending = await takePendingCorrection();
-  } catch {
+    const response = await sendToBackground<{
+      ok: boolean;
+      pending?: PendingCorrection | null;
+      error?: string;
+    }>({
+      type: 'pending:take',
+      target: 'background',
+    });
+    if (!response.ok) throw new Error(response.error ?? 'The selected text could not be loaded.');
+    pending = response.pending ?? null;
+  } catch (error) {
+    setHint(errorMessage(error));
     return false;
   }
   const text = pending?.text;
   if (!text?.trim()) return false;
+  if (editorTouched) return false;
 
   activateTab('editor');
   const input = el<HTMLTextAreaElement>('editor-input');
@@ -638,9 +822,29 @@ async function consumePendingCorrection(): Promise<boolean> {
 }
 
 async function restoreEditorDraft(): Promise<{ restored: boolean; hasResult: boolean }> {
-  let draft: Awaited<ReturnType<typeof loadEditorDraft>>;
+  if (editorTouched) return { restored: false, hasResult: false };
+  let draft: EditorDraft | null;
   try {
-    draft = await loadEditorDraft();
+    const response = await sendToBackground<{
+      ok: boolean;
+      draft?: EditorDraft | null;
+      revision?: number | null;
+      error?: string;
+    }>({
+      type: 'editor:draft:get',
+      target: 'background',
+    });
+    if (!response.ok) throw new Error(response.error ?? 'The draft could not be loaded.');
+    if (editorTouched) return { restored: false, hasResult: false };
+    draft = response.draft ?? null;
+    if (response.revision !== undefined && response.revision !== null) {
+      lastDraftRevision = Math.max(lastDraftRevision, response.revision);
+    }
+    currentTextRevision = response.revision ?? null;
+    currentDraftSave =
+      currentTextRevision === null
+        ? null
+        : Promise.resolve({ saved: true, revision: currentTextRevision });
   } catch (error) {
     setDraftStatus('Unavailable', 'error', errorMessage(error));
     return { restored: false, hasResult: false };
@@ -651,9 +855,16 @@ async function restoreEditorDraft(): Promise<{ restored: boolean; hasResult: boo
   input.value = draft.text;
   hideResult();
   updateEditorControls();
-  if (draft.corrections !== undefined) renderResult(draft.text, draft.corrections, false);
+  const currentConfigKey = settings ? runnerSettingsKey(settings) : null;
+  const hasResult =
+    draft.corrections !== undefined &&
+    draft.configKey !== undefined &&
+    draft.configKey === currentConfigKey;
+  if (hasResult && draft.corrections && draft.configKey) {
+    renderResult(draft.text, draft.corrections, draft.configKey);
+  }
   setDraftStatus('Restored');
-  return { restored: true, hasResult: draft.corrections !== undefined };
+  return { restored: true, hasResult };
 }
 
 async function init(): Promise<void> {
@@ -685,6 +896,15 @@ async function init(): Promise<void> {
 
   renderControls();
   void loadAiAvailability();
+  onSettingsChanged((next) => {
+    settingsChangeGeneration++;
+    const runnerChanged =
+      settings !== null && runnerSettingsKey(settings) !== runnerSettingsKey(next);
+    settings = next;
+    renderControls();
+    if (runnerChanged && invalidateEditorForRunnerChange()) scheduleEditorCorrect(150);
+    if (runnerChanged) void loadAiAvailability();
+  });
 
   chrome.runtime.onMessage.addListener((message: unknown, sender) => {
     if (isOffscreenSender(sender, chrome.runtime.id) && isStatusBroadcast(message)) {

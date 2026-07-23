@@ -127,17 +127,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
     case 'check': {
-      const { requestId, text } = message;
+      const { requestId, text, startOffset } = message;
       void (async () => {
         try {
-          const corrections = await getCorrector().correct(text);
-          const result: CheckResult = { requestId, sourceText: text, corrections };
+          const batch = await getCorrector().correct(text, startOffset);
+          const result: CheckResult = { requestId, sourceText: text, ...batch };
           sendResponse(result);
         } catch (error) {
           const result: CheckResult = {
             requestId,
             sourceText: text,
             corrections: [],
+            nextOffset: startOffset ?? 0,
+            complete: true,
             error: error instanceof Error ? error.message : String(error),
           };
           sendResponse(result);

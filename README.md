@@ -139,8 +139,8 @@ offset↔DOM mapping are covered by unit tests under `src/**/*.test.ts`.
 
 Your text is checked **entirely on your device** and is never sent to the
 developer or any third party. The extension has no servers, no accounts, no
-analytics, and no tracking. Settings and downloaded model files are stored
-locally. See the full [Privacy Policy](PRIVACY.md).
+analytics, and no tracking. Settings, built-in editor drafts, and downloaded
+model files are stored locally. See the full [Privacy Policy](PRIVACY.md).
 
 ## 🙏 Acknowledgments
 

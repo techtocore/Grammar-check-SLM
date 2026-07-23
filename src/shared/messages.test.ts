@@ -27,6 +27,34 @@ describe('runtime message validation', () => {
       isBackgroundMessage({ target: 'background', type: 'check', requestId: 4, text: '' }),
     ).toBe(false);
     expect(
+      isBackgroundMessage({
+        target: 'background',
+        type: 'check',
+        requestId: 'request',
+        text: 'Text',
+        startOffset: -1,
+      }),
+    ).toBe(false);
+    expect(
+      isBackgroundMessage({
+        target: 'background',
+        type: 'correct',
+        requestId: 'request',
+        text: 'Text',
+        configKey: 4,
+      }),
+    ).toBe(false);
+    expect(
+      isBackgroundMessage({
+        target: 'background',
+        type: 'editor:draft:save',
+        sourceId: 'popup',
+        sequence: 1,
+        revision: 1,
+        draft: { text: 'Text', corrections: 'invalid' },
+      }),
+    ).toBe(false);
+    expect(
       isOffscreenMessage({ target: 'offscreen', type: 'download', modelId: '', device: 'wasm' }),
     ).toBe(false);
     expect(
@@ -137,6 +165,26 @@ describe('runtime sender authorization', () => {
     target: 'background',
     modelId: 'onnx-community/Qwen3-0.6B-ONNX',
   };
+  const saveDraft: BackgroundMessage = {
+    type: 'editor:draft:save',
+    target: 'background',
+    sourceId: 'popup-a',
+    sequence: 1,
+    revision: 100,
+    draft: { text: 'Keep this text.' },
+  };
+  const takePending: BackgroundMessage = {
+    type: 'pending:take',
+    target: 'background',
+  };
+  const saveDraftResult: BackgroundMessage = {
+    type: 'editor:draft:result',
+    target: 'background',
+    baseRevision: 100,
+    text: 'Keep this text.',
+    corrections: [],
+    configKey: 'runner-a',
+  };
 
   it('limits content scripts to checks and warmup', () => {
     const content = sender('https://example.com/editor', true);
@@ -154,8 +202,14 @@ describe('runtime sender authorization', () => {
     const options = sender(`chrome-extension://${EXTENSION_ID}/options.html`, true);
     expect(isAuthorizedBackgroundMessage(settings, popup, EXTENSION_ID)).toBe(true);
     expect(isAuthorizedBackgroundMessage(settings, expanded, EXTENSION_ID)).toBe(true);
+    expect(isAuthorizedBackgroundMessage(saveDraft, popup, EXTENSION_ID)).toBe(true);
+    expect(isAuthorizedBackgroundMessage(saveDraftResult, popup, EXTENSION_ID)).toBe(true);
+    expect(isAuthorizedBackgroundMessage(takePending, popup, EXTENSION_ID)).toBe(true);
     expect(isAuthorizedBackgroundMessage(check, popup, EXTENSION_ID)).toBe(false);
     expect(isAuthorizedBackgroundMessage(deleteModel, options, EXTENSION_ID)).toBe(true);
+    expect(isAuthorizedBackgroundMessage(saveDraft, options, EXTENSION_ID)).toBe(false);
+    expect(isAuthorizedBackgroundMessage(saveDraftResult, options, EXTENSION_ID)).toBe(false);
+    expect(isAuthorizedBackgroundMessage(takePending, options, EXTENSION_ID)).toBe(false);
     expect(isAuthorizedBackgroundMessage(check, options, EXTENSION_ID)).toBe(false);
   });
 

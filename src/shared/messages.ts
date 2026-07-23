@@ -1,4 +1,5 @@
 import type { Correction } from '../core/types';
+import { isEditorDraft, type EditorDraft } from './editor-draft';
 import type { DevicePreference } from './models';
 import type { Backend, Settings } from './settings';
 
@@ -27,11 +28,22 @@ export interface RunnerConfig {
   language: string;
 }
 
-export interface CheckResult {
+export interface CorrectionBatch {
+  corrections: Correction[];
+  /** Character offset where the next bounded pass should begin. */
+  nextOffset: number;
+  /** Whether the entire source text has been checked. */
+  complete: boolean;
+}
+
+export interface CheckResult extends CorrectionBatch {
   requestId: string;
   /** Echo of the exact text that was checked, so callers can detect staleness. */
   sourceText: string;
-  corrections: Correction[];
+  /** Stable identity of the runner settings used for this batch. */
+  configKey?: string;
+  /** Signals that the caller must discard earlier batches and restart. */
+  configurationChanged?: boolean;
   error?: string;
 }
 
@@ -61,13 +73,51 @@ export type BackgroundMessage =
   | { type: 'status'; target: 'background' }
   | { type: 'warmup'; target: 'background' }
   | { type: 'retry'; target: 'background' }
-  | { type: 'check'; target: 'background'; requestId: string; text: string }
-  | { type: 'correct'; target: 'background'; requestId: string; text: string }
+  | {
+      type: 'check';
+      target: 'background';
+      requestId: string;
+      text: string;
+      startOffset?: number;
+      configKey?: string;
+    }
+  | {
+      type: 'correct';
+      target: 'background';
+      requestId: string;
+      text: string;
+      startOffset?: number;
+      configKey?: string;
+    }
   | { type: 'settings:get'; target: 'background' }
   | { type: 'settings:set'; target: 'background'; patch: Partial<Settings> }
+  | { type: 'editor:draft:get'; target: 'background' }
+  | {
+      type: 'editor:draft:save';
+      target: 'background';
+      sourceId: string;
+      sequence: number;
+      revision: number;
+      draft: EditorDraft;
+    }
+  | {
+      type: 'editor:draft:clear';
+      target: 'background';
+      sourceId: string;
+      sequence: number;
+      revision: number;
+    }
+  | {
+      type: 'editor:draft:result';
+      target: 'background';
+      baseRevision: number;
+      text: string;
+      corrections: Correction[];
+      configKey: string;
+    }
+  | { type: 'pending:take'; target: 'background' }
   | { type: 'setup:verify'; target: 'background' }
   | { type: 'setup:complete'; target: 'background' }
-  | { type: 'site:enabled'; target: 'background'; origin: string }
   | { type: 'models:list'; target: 'background' }
   | {
       type: 'models:download';
@@ -99,7 +149,13 @@ export type OffscreenMessage =
       device: DevicePreference;
     }
   | { type: 'download:delete'; target: 'offscreen'; modelId: string }
-  | { type: 'check'; target: 'offscreen'; requestId: string; text: string }
+  | {
+      type: 'check';
+      target: 'offscreen';
+      requestId: string;
+      text: string;
+      startOffset?: number;
+    }
   | { type: 'config'; target: 'offscreen'; config: RunnerConfig }
   | {
       type: 'download';
@@ -142,12 +198,49 @@ export interface DownloadProgress {
 
 type SenderContext = 'content' | 'popup' | 'options' | 'offscreen' | 'background' | 'unknown';
 
+const AUTHORIZED_BACKGROUND_MESSAGES: Record<
+  Extract<SenderContext, 'content' | 'popup' | 'options'>,
+  ReadonlySet<BackgroundMessage['type']>
+> = {
+  content: new Set(['check', 'warmup']),
+  popup: new Set([
+    'status',
+    'retry',
+    'correct',
+    'settings:get',
+    'settings:set',
+    'editor:draft:get',
+    'editor:draft:save',
+    'editor:draft:clear',
+    'editor:draft:result',
+    'pending:take',
+  ]),
+  options: new Set([
+    'status',
+    'retry',
+    'settings:get',
+    'settings:set',
+    'setup:verify',
+    'setup:complete',
+    'models:list',
+    'models:download',
+    'models:onboarding:select',
+    'models:delete',
+  ]),
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function hasText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
+}
+
+function isOffset(value: unknown): value is number | undefined {
+  return (
+    value === undefined || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
+  );
 }
 
 function senderContext(sender: chrome.runtime.MessageSender, extensionId: string): SenderContext {
@@ -181,6 +274,8 @@ export function isBackgroundMessage(msg: unknown): msg is BackgroundMessage {
     case 'warmup':
     case 'retry':
     case 'settings:get':
+    case 'editor:draft:get':
+    case 'pending:take':
     case 'setup:verify':
     case 'setup:complete':
       return true;
@@ -188,11 +283,49 @@ export function isBackgroundMessage(msg: unknown): msg is BackgroundMessage {
       return msg.device === undefined;
     case 'check':
     case 'correct':
-      return hasText(msg.requestId) && typeof msg.text === 'string';
+      return (
+        hasText(msg.requestId) &&
+        typeof msg.text === 'string' &&
+        isOffset(msg.startOffset) &&
+        (msg.configKey === undefined || hasText(msg.configKey))
+      );
     case 'settings:set':
       return isRecord(msg.patch);
-    case 'site:enabled':
-      return hasText(msg.origin);
+    case 'editor:draft:save':
+      return (
+        hasText(msg.sourceId) &&
+        msg.sourceId.length <= 100 &&
+        typeof msg.sequence === 'number' &&
+        Number.isSafeInteger(msg.sequence) &&
+        msg.sequence >= 0 &&
+        typeof msg.revision === 'number' &&
+        Number.isSafeInteger(msg.revision) &&
+        msg.revision >= 0 &&
+        isEditorDraft(msg.draft)
+      );
+    case 'editor:draft:clear':
+      return (
+        hasText(msg.sourceId) &&
+        msg.sourceId.length <= 100 &&
+        typeof msg.sequence === 'number' &&
+        Number.isSafeInteger(msg.sequence) &&
+        msg.sequence >= 0 &&
+        typeof msg.revision === 'number' &&
+        Number.isSafeInteger(msg.revision) &&
+        msg.revision >= 0
+      );
+    case 'editor:draft:result':
+      return (
+        typeof msg.baseRevision === 'number' &&
+        Number.isSafeInteger(msg.baseRevision) &&
+        msg.baseRevision >= 0 &&
+        typeof msg.text === 'string' &&
+        isEditorDraft({
+          text: msg.text,
+          corrections: msg.corrections,
+          configKey: msg.configKey,
+        })
+      );
     case 'models:download':
       return hasText(msg.modelId) && (msg.purpose === undefined || msg.purpose === 'onboarding');
     case 'models:onboarding:select':
@@ -215,7 +348,7 @@ export function isOffscreenMessage(msg: unknown): msg is OffscreenMessage {
     case 'downloads:status':
       return true;
     case 'check':
-      return hasText(msg.requestId) && typeof msg.text === 'string';
+      return hasText(msg.requestId) && typeof msg.text === 'string' && isOffset(msg.startOffset);
     case 'config':
       return isRecord(msg.config);
     case 'download':
@@ -283,21 +416,9 @@ export function isAuthorizedBackgroundMessage(
   extensionId: string,
 ): boolean {
   const context = senderContext(sender, extensionId);
-  if (context === 'content') return message.type === 'check' || message.type === 'warmup';
-  if (context === 'popup') {
-    return ![
-      'check',
-      'models:list',
-      'models:download',
-      'models:delete',
-      'setup:verify',
-      'setup:complete',
-    ].includes(message.type);
-  }
-  if (context === 'options') {
-    return !['check', 'correct', 'site:enabled', 'warmup'].includes(message.type);
-  }
-  return false;
+  return context === 'content' || context === 'popup' || context === 'options'
+    ? AUTHORIZED_BACKGROUND_MESSAGES[context].has(message.type)
+    : false;
 }
 
 /** Whether a runtime message originated in this extension's service worker. */

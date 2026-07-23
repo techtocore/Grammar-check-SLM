@@ -54,7 +54,7 @@ describe('FieldController', () => {
     const controller = new FieldController(adapter, DEFAULT_SETTINGS, tooltip);
     expect(handlers).toBeDefined();
     field.dispatchEvent(new MouseEvent('mousemove', { clientX: 5, clientY: 5 }));
-    vi.runOnlyPendingTimers();
+    vi.advanceTimersByTime(20);
     expect(callbacks).toBeDefined();
 
     field.type = 'password';
@@ -92,6 +92,145 @@ describe('FieldController', () => {
     expect(vi.getTimerCount()).toBe(0);
     vi.runAllTimers();
     expect(sendMessage).not.toHaveBeenCalled();
+    controller.destroy();
+  });
+
+  it('checks subsequent bounded passes and merges their corrections', async () => {
+    vi.useFakeTimers();
+    const field = document.createElement('textarea');
+    field.value = 'This sentence has enough words for another sentence.';
+    document.body.append(field);
+    const firstCorrection: Correction = {
+      start: 5,
+      end: 13,
+      original: 'sentence',
+      suggestion: 'statement',
+      kind: 'replace',
+    };
+    const secondCorrection: Correction = {
+      start: 36,
+      end: 44,
+      original: 'sentence',
+      suggestion: 'statement',
+      kind: 'replace',
+    };
+    const sendMessage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        requestId: 'first',
+        sourceText: field.value,
+        corrections: [firstCorrection],
+        nextOffset: 30,
+        complete: false,
+      })
+      .mockResolvedValueOnce({
+        requestId: 'second',
+        sourceText: field.value,
+        corrections: [secondCorrection],
+        nextOffset: field.value.length,
+        complete: true,
+      });
+    vi.stubGlobal('chrome', { runtime: { id: 'extension', sendMessage } });
+    const showCorrections = vi.fn();
+    const adapter: FieldAdapter = {
+      element: field,
+      kind: 'textinput',
+      getText: () => field.value,
+      showCorrections,
+      clear: vi.fn(),
+      rectFor: vi.fn(() => null),
+      correctionRects: () => [],
+      applyEdit: vi.fn(() => true),
+      attach: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const tooltip = { hide: vi.fn() } as unknown as Tooltip;
+    const controller = new FieldController(adapter, DEFAULT_SETTINGS, tooltip);
+
+    await vi.advanceTimersByTimeAsync(400);
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
+
+    expect(sendMessage.mock.calls[0]?.[0]).toMatchObject({ startOffset: 0 });
+    expect(sendMessage.mock.calls[1]?.[0]).toMatchObject({ startOffset: 30 });
+    expect(showCorrections).toHaveBeenLastCalledWith([firstCorrection, secondCorrection]);
+    controller.destroy();
+  });
+
+  it('restarts a multi-pass check instead of mixing runner configurations', async () => {
+    vi.useFakeTimers();
+    const field = document.createElement('textarea');
+    field.value = 'This sentence has enough words for another sentence.';
+    document.body.append(field);
+    const oldCorrection: Correction = {
+      start: 5,
+      end: 13,
+      original: 'sentence',
+      suggestion: 'statement',
+      kind: 'replace',
+    };
+    const newCorrection: Correction = {
+      start: 36,
+      end: 44,
+      original: 'sentence',
+      suggestion: 'statement',
+      kind: 'replace',
+    };
+    const sendMessage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        requestId: 'old',
+        sourceText: field.value,
+        corrections: [oldCorrection],
+        nextOffset: 30,
+        complete: false,
+        configKey: 'old-config',
+      })
+      .mockResolvedValueOnce({
+        requestId: 'changed',
+        sourceText: field.value,
+        corrections: [],
+        nextOffset: 0,
+        complete: true,
+        configKey: 'new-config',
+        configurationChanged: true,
+      })
+      .mockResolvedValueOnce({
+        requestId: 'new',
+        sourceText: field.value,
+        corrections: [newCorrection],
+        nextOffset: field.value.length,
+        complete: true,
+        configKey: 'new-config',
+      });
+    vi.stubGlobal('chrome', { runtime: { id: 'extension', sendMessage } });
+    const showCorrections = vi.fn();
+    const adapter: FieldAdapter = {
+      element: field,
+      kind: 'textinput',
+      getText: () => field.value,
+      showCorrections,
+      clear: vi.fn(),
+      rectFor: vi.fn(() => null),
+      correctionRects: () => [],
+      applyEdit: vi.fn(() => true),
+      attach: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const tooltip = { hide: vi.fn() } as unknown as Tooltip;
+    const controller = new FieldController(adapter, DEFAULT_SETTINGS, tooltip);
+
+    await vi.advanceTimersByTimeAsync(400);
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(3));
+
+    expect(sendMessage.mock.calls[1]?.[0]).toMatchObject({
+      startOffset: 30,
+      configKey: 'old-config',
+    });
+    expect(sendMessage.mock.calls[2]?.[0]).toMatchObject({
+      startOffset: 0,
+      configKey: 'new-config',
+    });
+    expect(showCorrections).toHaveBeenLastCalledWith([newCorrection]);
     controller.destroy();
   });
 });

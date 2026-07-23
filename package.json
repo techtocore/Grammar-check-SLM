@@ -1,6 +1,6 @@
 {
   "name": "grammar-check-slm",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Privacy-first, on-device grammar checking browser extension powered by a local Small Language Model (Transformers.js) with WebGPU acceleration.",
   "type": "module",
   "author": "techtocore",

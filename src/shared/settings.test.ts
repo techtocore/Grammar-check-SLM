@@ -4,6 +4,7 @@ import {
   isSiteEnabled,
   loadSettings,
   normalizeSettings,
+  runnerSettingsKey,
   saveSettings,
   setSiteEnabled,
   type Settings,
@@ -42,6 +43,15 @@ describe('settings normalization', () => {
       model: 'auto',
       device: 'auto',
     });
+  });
+
+  it('changes the runner identity only for model-output settings', () => {
+    const base = runnerSettingsKey(DEFAULT_SETTINGS);
+    const unrelated = { ...DEFAULT_SETTINGS, minWords: 9 };
+
+    expect(runnerSettingsKey(unrelated)).toBe(base);
+    expect(runnerSettingsKey({ ...DEFAULT_SETTINGS, model: 'qwen3-0.6b' })).not.toBe(base);
+    expect(runnerSettingsKey({ ...DEFAULT_SETTINGS, language: 'fr' })).not.toBe(base);
   });
 
   it('validates enums, numbers, models, and language tags', () => {

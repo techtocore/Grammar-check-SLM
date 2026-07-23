@@ -58,7 +58,34 @@ describe('Corrector', () => {
     const corrector = new Corrector(vi.fn(), () => [() => backend]);
     await corrector.setConfig(CONFIG);
 
-    await expect(corrector.correct('This sentence have enough words.')).resolves.not.toEqual([]);
+    const result = await corrector.correct('This sentence have enough words.');
+
+    expect(result).toMatchObject({ complete: true });
+    expect(result.corrections).not.toEqual([]);
+  });
+
+  it('continues checking text after the first bounded sentence pass', async () => {
+    const generate = vi.fn((sentence: string) =>
+      Promise.resolve(sentence.replace(' have ', ' has ')),
+    );
+    const backend = fakeBackend(generate);
+    const corrector = new Corrector(vi.fn(), () => [() => backend]);
+    await corrector.setConfig(CONFIG);
+    const text = Array.from(
+      { length: 61 },
+      (_, index) => `This sentence number ${index} have enough words.`,
+    ).join(' ');
+
+    const first = await corrector.correct(text);
+    const second = await corrector.correct(text, first.nextOffset);
+
+    expect(first.complete).toBe(false);
+    expect(first.nextOffset).toBeGreaterThan(0);
+    expect(first.nextOffset).toBeLessThan(text.length);
+    expect(second.complete).toBe(true);
+    expect(second.nextOffset).toBe(text.length);
+    expect(second.corrections.some((correction) => correction.start > first.nextOffset)).toBe(true);
+    expect(generate).toHaveBeenCalledTimes(61);
   });
 
   it('quietly falls back to the local backend when Chrome AI is not ready', async () => {
@@ -133,6 +160,69 @@ describe('Corrector', () => {
     await checking;
     await changing;
     expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('clears sentence text from memory when the runner is suspended', async () => {
+    const generate = vi.fn(() => Promise.resolve('This sentence has enough words.'));
+    const backend = fakeBackend(generate);
+    const corrector = new Corrector(vi.fn(), () => [() => backend]);
+    await corrector.setConfig(CONFIG);
+
+    await corrector.correct('This sentence has enough words.');
+    await corrector.suspend();
+    await corrector.correct('This sentence has enough words.');
+
+    expect(generate).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not repopulate the sentence cache from inference finishing during suspension', async () => {
+    let finishGeneration: ((value: string) => void) | undefined;
+    const generate = vi
+      .fn<(sentence: string) => Promise<string>>()
+      .mockImplementationOnce(
+        () =>
+          new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          }),
+      )
+      .mockImplementation((sentence: string) => Promise.resolve(sentence));
+    const backend = fakeBackend(generate);
+    const corrector = new Corrector(vi.fn(), () => [() => backend]);
+    await corrector.setConfig(CONFIG);
+
+    const text = 'This first sentence has enough words. This second sentence has enough words.';
+    const checking = corrector.correct(text);
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledOnce());
+    const suspending = corrector.suspend();
+    finishGeneration?.('This first sentence has enough words.');
+    await Promise.all([checking, suspending]);
+    await corrector.correct(text);
+
+    expect(generate).toHaveBeenCalledTimes(4);
+  });
+
+  it('cancels checks that were queued before suspension', async () => {
+    let finishGeneration: ((value: string) => void) | undefined;
+    const generate = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          finishGeneration = resolve;
+        }),
+    );
+    const backend = fakeBackend(generate);
+    const corrector = new Corrector(vi.fn(), () => [() => backend]);
+    await corrector.setConfig(CONFIG);
+
+    const active = corrector.correct('This active sentence has enough words.');
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledOnce());
+    const queued = corrector.correct('This queued sentence has enough words.');
+    const suspending = corrector.suspend();
+    finishGeneration?.('This active sentence has enough words.');
+
+    await active;
+    await expect(queued).rejects.toThrow('model runner changed');
+    await suspending;
+    expect(generate).toHaveBeenCalledOnce();
   });
 
   it('queues downloads behind warmup and releases the loaded backend first', async () => {

@@ -11,7 +11,13 @@ const READY: ModelStatus = {
 };
 
 function result(corrections: CheckResult['corrections']): CheckResult {
-  return { requestId: 'setup', sourceText: SETUP_PROBE, corrections };
+  return {
+    requestId: 'setup',
+    sourceText: SETUP_PROBE,
+    corrections,
+    nextOffset: SETUP_PROBE.length,
+    complete: true,
+  };
 }
 
 describe('setup verification', () => {

@@ -2,8 +2,13 @@ import { segmentSentences, splitLongSentence } from '../core/segment';
 import { assembleCorrections } from '../core/corrections';
 import { cleanModelOutput } from '../core/prompt';
 import { LRUCache } from '../core/cache';
-import type { Correction, Sentence } from '../core/types';
-import type { ModelDownloadStatus, ModelStatus, RunnerConfig } from '../shared/messages';
+import type { Sentence } from '../core/types';
+import type {
+  CorrectionBatch,
+  ModelDownloadStatus,
+  ModelStatus,
+  RunnerConfig,
+} from '../shared/messages';
 import { broadcastDownload } from '../shared/messages';
 import { getPreset, MODEL_PRESETS, resolvePreset } from '../shared/models';
 import { createLogger } from '../shared/logger';
@@ -19,7 +24,7 @@ const log = createLogger('runner');
 
 // Bound how much text we run per request to keep latency reasonable.
 const MAX_SENTENCE_LEN = 320;
-const MAX_SENTENCES = 60;
+const MAX_SENTENCES_PER_PASS = 60;
 
 // After a load failure, don't retry for this long (prevents a retry storm where
 // every incoming check re-runs the whole failing load and thrashes memory).
@@ -77,6 +82,7 @@ export class Corrector {
   private config: RunnerConfig | null = null;
   private loadGeneration = 0;
   private loadFailedAt = 0;
+  private cacheGeneration = 0;
   private readonly cache = new LRUCache<string, string>(1000);
   private readonly downloadStatuses = new Map<string, ModelDownloadStatus>();
   private readonly downloadStatusOwners = new Map<string, string>();
@@ -218,33 +224,57 @@ export class Corrector {
 
   /** Releases model memory after queued inference/download work has completed. */
   suspend(): Promise<void> {
-    return this.runExclusive(() => this.dispose());
+    this.cacheGeneration++;
+    this.cache.clear();
+    return this.runExclusive(async () => {
+      this.cache.clear();
+      await this.dispose();
+    });
   }
 
-  async correct(text: string): Promise<Correction[]> {
+  async correct(text: string, startOffset = 0): Promise<CorrectionBatch> {
+    const requestedCacheGeneration = this.cacheGeneration;
     return this.runExclusive(async () => {
+      if (requestedCacheGeneration !== this.cacheGeneration) {
+        throw new Error('Grammar check cancelled because the model runner changed.');
+      }
       await this.ensureLoaded();
       const config = this.config;
-      if (!config) return [];
+      if (!config) return { corrections: [], nextOffset: text.length, complete: true };
 
+      const offset = Math.min(Math.max(0, startOffset), text.length);
       const sentences: Sentence[] = [];
-      for (const sentence of segmentSentences(text, config.language)) {
+      let hasMore = false;
+      for (const relative of segmentSentences(text.slice(offset), config.language)) {
+        const sentence: Sentence = {
+          text: relative.text,
+          start: relative.start + offset,
+          end: relative.end + offset,
+        };
         for (const chunk of splitLongSentence(sentence, MAX_SENTENCE_LEN)) {
+          if (sentences.length >= MAX_SENTENCES_PER_PASS) {
+            hasMore = true;
+            break;
+          }
           sentences.push(chunk);
-          if (sentences.length >= MAX_SENTENCES) break;
         }
-        if (sentences.length >= MAX_SENTENCES) break;
+        if (hasMore) break;
       }
 
       const corrected: string[] = [];
+      const cacheGeneration = requestedCacheGeneration;
       for (const sentence of sentences) {
-        corrected.push(await this.correctSentence(sentence.text));
+        corrected.push(await this.correctSentence(sentence.text, cacheGeneration));
       }
       const corrections = assembleCorrections(text, sentences, corrected, {
         locale: config.language,
       });
-      log.debug(`Corrected ${sentences.length} segment(s) → ${corrections.length} suggestion(s).`);
-      return corrections;
+      const nextOffset = hasMore ? (sentences.at(-1)?.end ?? text.length) : text.length;
+      log.debug(
+        `Corrected ${sentences.length} segment(s) → ${corrections.length} suggestion(s)` +
+          `${hasMore ? ` (next offset ${nextOffset})` : ''}.`,
+      );
+      return { corrections, nextOffset, complete: !hasMore };
     });
   }
 
@@ -514,7 +544,7 @@ export class Corrector {
     });
   }
 
-  private async correctSentence(sentence: string): Promise<string> {
+  private async correctSentence(sentence: string, cacheGeneration: number): Promise<string> {
     const cached = this.cache.get(sentence);
     if (cached !== undefined) return cached;
 
@@ -522,9 +552,8 @@ export class Corrector {
     if (!backend) return sentence;
 
     const raw = await backend.generate(sentence);
-
     const cleaned = cleanModelOutput(raw, sentence);
-    this.cache.set(sentence, cleaned);
+    if (cacheGeneration === this.cacheGeneration) this.cache.set(sentence, cleaned);
     return cleaned;
   }
 

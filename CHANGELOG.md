@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-07-22
+
+### Added
+
+- Durable local drafts for the built-in editor, including restored correction
+  results and a responsive full-page editing mode.
+
 ### Changed
 
 - Simplified local model selection to Qwen3.5 0.8B on WebGPU and Qwen3 0.6B
@@ -17,6 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Chrome AI unless it is already ready instead of logging a load failure.
 - First-run setup now requires a successful grammar correction and activates
   content scripts in eligible tabs that were already open during installation.
+
+### Fixed
+
+- Long documents are now checked in bounded, cancelable passes instead of
+  silently stopping after the first 60 sentence chunks.
+- Popup draft writes are ordered and persisted by the service worker, preventing
+  delayed edits from overwriting newer text.
+- Concurrent right-click handoffs can no longer delete or replay a different
+  selected-text correction.
+- Disabling the extension clears cached sentence text immediately and prevents
+  in-flight checks from repopulating it.
+- Release verification now checks manifest assets, version parity, source-map
+  exclusion, CSP safety, and accidental Node-only dependency bundling.
 
 ## [1.0.1] — 2026-07-15
 

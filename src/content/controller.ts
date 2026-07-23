@@ -114,31 +114,63 @@ export class FieldController {
     }
 
     const seq = ++this.requestSeq;
-    let result: CheckResult;
-    try {
-      result = await sendToBackground<CheckResult>({
-        type: 'check',
-        target: 'background',
-        requestId: newRequestId(),
-        text,
-      });
-    } catch (error) {
-      if (isContextInvalidationError(error)) {
-        invalidateContext();
+    const corrections: Correction[] = [];
+    let startOffset = 0;
+    let configKey: string | undefined;
+    let configRestarts = 0;
+    while (true) {
+      let result: CheckResult;
+      try {
+        result = await sendToBackground<CheckResult>({
+          type: 'check',
+          target: 'background',
+          requestId: newRequestId(),
+          text,
+          startOffset,
+          configKey,
+        });
+      } catch (error) {
+        if (isContextInvalidationError(error)) {
+          invalidateContext();
+          return;
+        }
+        log.warn('Grammar check request failed.', error);
         return;
       }
-      log.warn('Grammar check request failed.', error);
-      return;
+
+      if (this.destroyed || seq !== this.requestSeq) return;
+      // Discard if the field changed while we were waiting.
+      if (this.adapter.getText() !== result.sourceText) return;
+
+      if (result.configurationChanged) {
+        if (++configRestarts > 3) {
+          log.warn('Grammar check stopped because settings kept changing.');
+          return;
+        }
+        corrections.length = 0;
+        startOffset = 0;
+        configKey = result.configKey;
+        this.setCorrections([]);
+        continue;
+      }
+      configKey = result.configKey ?? configKey;
+      if (result.error) {
+        log.warn('Grammar check returned an error:', result.error);
+        return;
+      }
+      corrections.push(...result.corrections);
+      const filtered = corrections.filter((correction) => !this.ignored.has(ignoreKey(correction)));
+      this.setCorrections(filtered);
+      if (result.complete) {
+        log.debug(`Checked ${text.length} chars → ${filtered.length} suggestion(s).`);
+        return;
+      }
+      if (result.nextOffset <= startOffset) {
+        log.warn('Grammar check stopped because its text cursor did not advance.');
+        return;
+      }
+      startOffset = result.nextOffset;
     }
-
-    if (this.destroyed || seq !== this.requestSeq) return;
-    // Discard if the field changed while we were waiting.
-    if (this.adapter.getText() !== result.sourceText) return;
-
-    if (result.error) log.warn('Grammar check returned an error:', result.error);
-    const filtered = result.corrections.filter((c) => !this.ignored.has(ignoreKey(c)));
-    log.debug(`Checked ${text.length} chars → ${filtered.length} suggestion(s).`);
-    this.setCorrections(filtered);
   }
 
   private setCorrections(corrections: Correction[]): void {

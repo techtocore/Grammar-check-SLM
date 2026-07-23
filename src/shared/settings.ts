@@ -36,6 +36,18 @@ export interface Settings {
   checkContentEditable: boolean;
 }
 
+/** Stable identity of settings that can change model output. */
+export function runnerSettingsKey(
+  settings: Pick<Settings, 'backend' | 'model' | 'device' | 'language'>,
+): string {
+  return JSON.stringify({
+    backend: settings.backend,
+    model: settings.model,
+    device: settings.device,
+    language: settings.language,
+  });
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   enabled: true,
   backend: 'transformers',

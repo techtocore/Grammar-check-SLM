@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   clearEditorDraft,
   loadEditorDraft,
+  loadEditorDraftState,
   normalizeEditorDraft,
   saveEditorDraft,
+  saveEditorDraftResult,
 } from './editor-draft';
 
 function installStorage(initial?: unknown) {
@@ -14,12 +16,8 @@ function installStorage(initial?: unknown) {
     Object.assign(values, structuredClone(patch));
     return Promise.resolve();
   });
-  const remove = vi.fn((key: string) => {
-    delete values[key];
-    return Promise.resolve();
-  });
-  vi.stubGlobal('chrome', { storage: { local: { get, set, remove } } });
-  return { values, get, set, remove };
+  vi.stubGlobal('chrome', { storage: { local: { get, set } } });
+  return { values, get, set };
 }
 
 describe('editor draft storage', () => {
@@ -77,20 +75,126 @@ describe('editor draft storage', () => {
     const draft = {
       text: 'A paragraph worth keeping.',
       corrections: [],
+      configKey: 'runner-a',
     };
 
-    await saveEditorDraft(draft);
+    await saveEditorDraft({ sourceId: 'popup-a', sequence: 1, revision: 100, draft });
     await expect(loadEditorDraft()).resolves.toEqual(draft);
+    await expect(loadEditorDraftState()).resolves.toEqual({ draft, revision: 100 });
     expect(storage.set).toHaveBeenCalledWith({
       popupEditorDraft: {
-        version: 1,
+        version: 2,
+        sourceId: 'popup-a',
+        sequence: 1,
+        revision: 100,
         text: draft.text,
         corrections: [],
+        configKey: 'runner-a',
       },
     });
 
-    await clearEditorDraft();
+    await clearEditorDraft('popup-a', 2, 200);
     await expect(loadEditorDraft()).resolves.toBeNull();
-    expect(storage.remove).toHaveBeenCalledWith('popupEditorDraft');
+    await expect(loadEditorDraftState()).resolves.toEqual({ draft: null, revision: 200 });
+    expect(storage.values.popupEditorDraft).toEqual({
+      version: 2,
+      sourceId: 'popup-a',
+      sequence: 2,
+      revision: 200,
+      text: '',
+    });
+  });
+
+  it('ignores a stale write from the same editor instance', async () => {
+    installStorage();
+
+    await expect(
+      saveEditorDraft({
+        sourceId: 'popup-a',
+        sequence: 2,
+        revision: 200,
+        draft: { text: 'Newest text' },
+      }),
+    ).resolves.toEqual({ applied: true, revision: 200 });
+    await expect(
+      saveEditorDraft({
+        sourceId: 'popup-a',
+        sequence: 1,
+        revision: 100,
+        draft: { text: 'Stale text' },
+      }),
+    ).resolves.toEqual({ applied: false, revision: 200 });
+
+    await expect(loadEditorDraft()).resolves.toEqual({ text: 'Newest text' });
+  });
+
+  it('rejects an older write from a different editor instance', async () => {
+    installStorage();
+
+    await saveEditorDraft({
+      sourceId: 'expanded',
+      sequence: 1,
+      revision: 300,
+      draft: { text: 'Full-page edit' },
+    });
+    await expect(
+      saveEditorDraft({
+        sourceId: 'popup',
+        sequence: 99,
+        revision: 250,
+        draft: { text: 'Delayed popup edit' },
+      }),
+    ).resolves.toEqual({ applied: false, revision: 300 });
+
+    await expect(loadEditorDraft()).resolves.toEqual({ text: 'Full-page edit' });
+  });
+
+  it('attaches results only to the exact saved text revision', async () => {
+    installStorage();
+    const corrections = [
+      {
+        start: 0,
+        end: 5,
+        original: 'These',
+        suggestion: 'This',
+        kind: 'replace' as const,
+      },
+    ];
+    await saveEditorDraft({
+      sourceId: 'popup',
+      sequence: 1,
+      revision: 100,
+      draft: { text: 'These are words.' },
+    });
+
+    await expect(
+      saveEditorDraftResult({
+        baseRevision: 100,
+        text: 'These are words.',
+        corrections,
+        configKey: 'runner-a',
+      }),
+    ).resolves.toBe(true);
+    await expect(loadEditorDraft()).resolves.toEqual({
+      text: 'These are words.',
+      corrections,
+      configKey: 'runner-a',
+    });
+
+    await saveEditorDraft({
+      sourceId: 'expanded',
+      sequence: 1,
+      revision: 200,
+      draft: { text: 'Newer text.' },
+    });
+    await expect(
+      saveEditorDraftResult({
+        baseRevision: 100,
+        text: 'These are words.',
+        corrections,
+        configKey: 'runner-a',
+      }),
+    ).resolves.toBe(false);
+    await expect(loadEditorDraft()).resolves.toEqual({ text: 'Newer text.' });
   });
 });

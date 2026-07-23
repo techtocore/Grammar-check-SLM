@@ -17,13 +17,24 @@ import {
   isSiteEnabled,
   loadSettings,
   originOf,
+  runnerSettingsKey,
   saveSettings,
   setSiteEnabled,
   type Settings,
 } from '../shared/settings';
 import { MODEL_PRESETS, resolvePreset } from '../shared/models';
 import { listModelCacheInfo } from '../shared/model-cache';
-import { setPendingCorrection, clearPendingCorrection } from '../shared/pending';
+import {
+  clearPendingCorrection,
+  setPendingCorrection,
+  takePendingCorrection,
+} from '../shared/pending';
+import {
+  clearEditorDraft,
+  loadEditorDraftState,
+  saveEditorDraft,
+  saveEditorDraftResult,
+} from '../shared/editor-draft';
 import { applyCorrections } from '../core/corrections';
 import { createLogger } from '../shared/logger';
 import { handleFirstRunInstall } from './first-run';
@@ -36,6 +47,8 @@ const CONTEXT_MENU_TOGGLE = 'gcslm-toggle-site';
 const CONTEXT_MENU_CORRECT = 'gcslm-correct-selection';
 
 let lastStatus: ModelStatus | null = null;
+let settingsGeneration = 0;
+let settingsMutation: Promise<void> = Promise.resolve();
 
 function runnerConfig(settings: Settings): RunnerConfig {
   return {
@@ -43,6 +56,42 @@ function runnerConfig(settings: Settings): RunnerConfig {
     model: settings.model,
     device: settings.device,
     language: settings.language,
+  };
+}
+
+function runnerConfigKey(settings: Settings): string {
+  return runnerSettingsKey(settings);
+}
+
+function checkConfigKey(settings: Settings, origin: string | null): string {
+  return JSON.stringify({
+    runner: runnerSettingsKey(settings),
+    siteEnabled: isSiteEnabled(settings, origin),
+  });
+}
+
+function trackSettingsMutation<T>(operation: Promise<T>): Promise<T> {
+  settingsGeneration++;
+  settingsMutation = operation.then(
+    () => undefined,
+    () => undefined,
+  );
+  return operation;
+}
+
+function changedConfigurationResult(
+  text: string,
+  requestId: string,
+  configKey: string,
+): CheckResult {
+  return {
+    requestId,
+    sourceText: text,
+    corrections: [],
+    nextOffset: 0,
+    complete: true,
+    configKey,
+    configurationChanged: true,
   };
 }
 
@@ -67,23 +116,107 @@ async function handleCheck(
   text: string,
   origin: string | null,
   requestId: string,
+  startOffset = 0,
+  expectedConfigKey?: string,
 ): Promise<CheckResult> {
+  await settingsMutation;
+  const generation = settingsGeneration;
   const settings = await loadSettings();
+  const configKey = checkConfigKey(settings, origin);
+  if (expectedConfigKey && expectedConfigKey !== configKey) {
+    return changedConfigurationResult(text, requestId, configKey);
+  }
   if (!isSiteEnabled(settings, origin)) {
-    return { requestId, sourceText: text, corrections: [] };
+    return {
+      requestId,
+      sourceText: text,
+      corrections: [],
+      nextOffset: text.length,
+      complete: true,
+      configKey,
+    };
   }
   await ensureConfigured(settings);
-  return sendToOffscreen<CheckResult>({ type: 'check', target: 'offscreen', requestId, text });
+  await settingsMutation;
+  const latestConfigKey = checkConfigKey(await loadSettings(), origin);
+  if (generation !== settingsGeneration || latestConfigKey !== configKey) {
+    return changedConfigurationResult(text, requestId, latestConfigKey);
+  }
+  const result = await sendToOffscreen<CheckResult>({
+    type: 'check',
+    target: 'offscreen',
+    requestId,
+    text,
+    startOffset,
+  });
+  await settingsMutation;
+  const completedConfigKey = checkConfigKey(await loadSettings(), origin);
+  if (generation !== settingsGeneration || completedConfigKey !== configKey) {
+    return changedConfigurationResult(text, requestId, completedConfigKey);
+  }
+  return { ...result, configKey };
 }
 
 /**
  * Corrects arbitrary text for the popup Editor — always allowed (not gated by
  * the per-site rules that apply to on-page checking).
  */
-async function handleCorrect(text: string, requestId: string): Promise<CheckResult> {
+async function handleCorrect(
+  text: string,
+  requestId: string,
+  startOffset = 0,
+  expectedConfigKey?: string,
+): Promise<CheckResult> {
+  await settingsMutation;
+  const generation = settingsGeneration;
   const settings = await loadSettings();
+  const configKey = runnerConfigKey(settings);
+  if (expectedConfigKey && expectedConfigKey !== configKey) {
+    return changedConfigurationResult(text, requestId, configKey);
+  }
   await ensureConfigured(settings);
-  return sendToOffscreen<CheckResult>({ type: 'check', target: 'offscreen', requestId, text });
+  await settingsMutation;
+  const latestConfigKey = runnerConfigKey(await loadSettings());
+  if (generation !== settingsGeneration || latestConfigKey !== configKey) {
+    return changedConfigurationResult(text, requestId, latestConfigKey);
+  }
+  const result = await sendToOffscreen<CheckResult>({
+    type: 'check',
+    target: 'offscreen',
+    requestId,
+    text,
+    startOffset,
+  });
+  await settingsMutation;
+  const completedConfigKey = runnerConfigKey(await loadSettings());
+  if (generation !== settingsGeneration || completedConfigKey !== configKey) {
+    return changedConfigurationResult(text, requestId, completedConfigKey);
+  }
+  return { ...result, configKey };
+}
+
+async function handleCorrectAll(text: string, requestId: string): Promise<CheckResult> {
+  const corrections: CheckResult['corrections'] = [];
+  let startOffset = 0;
+  let configKey: string | undefined;
+  let configRestarts = 0;
+  while (true) {
+    const result = await handleCorrect(text, requestId, startOffset, configKey);
+    if (result.configurationChanged) {
+      if (++configRestarts > 3) throw new Error('Grammar-check settings kept changing.');
+      corrections.length = 0;
+      startOffset = 0;
+      configKey = result.configKey;
+      continue;
+    }
+    configKey = result.configKey ?? configKey;
+    corrections.push(...result.corrections);
+    if (result.error || result.complete) return { ...result, corrections };
+    if (result.nextOffset <= startOffset) {
+      throw new Error('The grammar checker did not advance through the text.');
+    }
+    startOffset = result.nextOffset;
+  }
 }
 
 async function handleSetupVerify(): Promise<{
@@ -91,7 +224,7 @@ async function handleSetupVerify(): Promise<{
   status: ModelStatus;
   error?: string;
 }> {
-  const result = await handleCorrect(SETUP_PROBE, newRequestId());
+  const result = await handleCorrectAll(SETUP_PROBE, newRequestId());
   const status = await handleStatus();
   assertSetupVerified(result, status);
   return { ok: true, status };
@@ -379,31 +512,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
     case 'check': {
-      const { text, requestId } = message;
+      const { text, requestId, startOffset, configKey } = message;
       // Sender metadata is supplied by Chrome and cannot be spoofed by a page.
       // Opaque about:blank/srcdoc frames inherit the top tab's governing origin.
       const origin = originOf(sender.url) ?? originOf(sender.tab?.url);
-      handleCheck(text, origin, requestId)
+      handleCheck(text, origin, requestId, startOffset, configKey)
         .then(sendResponse)
         .catch((error: unknown) => {
           sendResponse({
             requestId,
             sourceText: text,
             corrections: [],
+            nextOffset: startOffset ?? 0,
+            complete: true,
             error: error instanceof Error ? error.message : String(error),
           });
         });
       return true;
     }
     case 'correct': {
-      const { text, requestId } = message;
-      handleCorrect(text, requestId)
+      const { text, requestId, startOffset, configKey } = message;
+      handleCorrect(text, requestId, startOffset, configKey)
         .then(sendResponse)
         .catch((error: unknown) => {
           sendResponse({
             requestId,
             sourceText: text,
             corrections: [],
+            nextOffset: startOffset ?? 0,
+            complete: true,
             error: error instanceof Error ? error.message : String(error),
           });
         });
@@ -416,12 +553,78 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
     case 'settings:set': {
-      saveSettings(message.patch)
-        .then(async (settings) => {
+      const operation = trackSettingsMutation(
+        saveSettings(message.patch).then(async (settings) => {
           await syncRunnerAfterSettings(settings, message.patch);
-          sendResponse(settings);
-        })
-        .catch(() => sendResponse(null));
+          return settings;
+        }),
+      );
+      operation.then(sendResponse).catch(() => sendResponse(null));
+      return true;
+    }
+    case 'editor:draft:get': {
+      loadEditorDraftState()
+        .then(({ draft, revision }) => sendResponse({ ok: true, draft, revision }))
+        .catch((error: unknown) =>
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      return true;
+    }
+    case 'editor:draft:save': {
+      saveEditorDraft({
+        sourceId: message.sourceId,
+        sequence: message.sequence,
+        revision: message.revision,
+        draft: message.draft,
+      })
+        .then((result) => sendResponse({ ok: true, ...result }))
+        .catch((error: unknown) =>
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      return true;
+    }
+    case 'editor:draft:clear': {
+      clearEditorDraft(message.sourceId, message.sequence, message.revision)
+        .then((result) => sendResponse({ ok: true, ...result }))
+        .catch((error: unknown) =>
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      return true;
+    }
+    case 'editor:draft:result': {
+      saveEditorDraftResult({
+        baseRevision: message.baseRevision,
+        text: message.text,
+        corrections: message.corrections,
+        configKey: message.configKey,
+      })
+        .then((applied) => sendResponse({ ok: true, applied }))
+        .catch((error: unknown) =>
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      return true;
+    }
+    case 'pending:take': {
+      takePendingCorrection()
+        .then((pending) => sendResponse({ ok: true, pending }))
+        .catch((error: unknown) =>
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
       return true;
     }
     case 'setup:verify': {
@@ -451,13 +654,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             error: error instanceof Error ? error.message : String(error),
           }),
         );
-      return true;
-    }
-    case 'site:enabled': {
-      const { origin } = message;
-      loadSettings()
-        .then((settings) => sendResponse(isSiteEnabled(settings, origin)))
-        .catch(() => sendResponse(false));
       return true;
     }
     default:
@@ -504,7 +700,7 @@ async function correctSelection(tabId: number, text: string, frameId?: number): 
     frameId,
   );
   try {
-    const result = await handleCorrect(text, requestId);
+    const result = await handleCorrectAll(text, requestId);
     const corrected = applyCorrections(text, result.corrections);
     messageTab(
       tabId,
@@ -550,14 +746,17 @@ async function openPopupWithSelection(
   frameId?: number,
 ): Promise<void> {
   if (typeof chrome.action.openPopup === 'function') {
-    void setPendingCorrection(text).catch(() => undefined);
+    const pending = setPendingCorrection(text);
+    void pending.stored.catch((error: unknown) =>
+      log.warn('Could not store the selected text for the popup.', error),
+    );
     try {
       await chrome.action.openPopup();
       return;
     } catch (error) {
       log.warn('Could not open the popup; correcting on the page instead.', error);
       // Don't leave the handoff behind to hijack the next popup open.
-      await clearPendingCorrection().catch(() => undefined);
+      await clearPendingCorrection(pending.key).catch(() => undefined);
     }
   }
   if (tabId !== undefined) void correctSelection(tabId, text, frameId);
@@ -583,11 +782,13 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === CONTEXT_MENU_TOGGLE) {
     const origin = originOf(tab?.url);
     if (!origin) return;
-    void (async () => {
-      const settings = await loadSettings();
-      const enabled = isSiteEnabled(settings, origin);
-      await saveSettings(setSiteEnabled(settings, origin, !enabled));
-    })();
+    void trackSettingsMutation(
+      (async () => {
+        const settings = await loadSettings();
+        const enabled = isSiteEnabled(settings, origin);
+        await saveSettings(setSiteEnabled(settings, origin, !enabled));
+      })(),
+    ).catch((error: unknown) => log.error('Could not toggle checking for this site.', error));
   }
 });
 
