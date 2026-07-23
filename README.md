@@ -1,11 +1,13 @@
 # Grammar Check SLM 🔍✍️
 
+![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen)
 ![Manifest V3](https://img.shields.io/badge/Manifest-V3-4285F4)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)
 ![AI: 100% on-device](https://img.shields.io/badge/AI-100%25%20on--device-10B981)
-![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen)
+![Chrome Web Store Version](https://img.shields.io/chrome-web-store/v/lohelopgomgjmabihgmcdpnmckjpdbhd)
 
-A privacy-first Chromium extension that fixes grammar and spelling **entirely on your device**. It
+
+A privacy-first [Chromium extension](https://chromewebstore.google.com/detail/lohelopgomgjmabihgmcdpnmckjpdbhd?utm_source=item-share-cb) that fixes grammar and spelling **entirely on your device**. It
 uses a downloaded **Qwen** model via
 [Transformers.js](https://github.com/huggingface/transformers.js) by default. Chrome's **built-in AI
 (Gemini Nano)** is available as an optional engine. Edited text is never uploaded; local model
@@ -101,6 +103,9 @@ Open the extension's **Settings** page (or the ⚙ button in the popup) to confi
 Right-click the toolbar icon or any text field to quickly toggle checking on the current site.
 Select text anywhere and right-click **“Correct grammar of …”** to correct it in place (or copy the
 result for read-only text).
+
+![Extension settings](/assets/settings.png)
+
 
 ### Engines
 
