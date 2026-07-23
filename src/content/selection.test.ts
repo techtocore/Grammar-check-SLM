@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContentMessage } from '../shared/messages';
+import { installExecCommand } from './exec-command.test-helper';
 import { initSelectionCorrection } from './selection';
 
 const EXTENSION_ID = 'abcdefghijklmnopabcdefghijklmnop';
@@ -94,5 +95,50 @@ describe('selection correction', () => {
     });
 
     expect(field.value).toBe('I already fixed this.');
+  });
+
+  it('replaces a selected word once in a WhatsApp Lexical editor', () => {
+    const editor = document.createElement('div');
+    editor.setAttribute('contenteditable', 'true');
+    editor.tabIndex = 10;
+    editor.setAttribute('data-lexical-editor', 'true');
+    editor.innerHTML = '<p><span data-lexical-text="true">Getting a new experrience</span></p>';
+    Object.defineProperty(editor, 'isContentEditable', {
+      configurable: true,
+      value: true,
+    });
+    document.body.append(editor);
+
+    const text = editor.querySelector('[data-lexical-text]')?.firstChild;
+    if (!(text instanceof Text)) throw new Error('Expected Lexical text node');
+    const original = 'experrience';
+    const start = text.data.indexOf(original);
+    editor.focus();
+    window.getSelection()?.setBaseAndExtent(text, start, text, start + original.length);
+    const onInput = vi.fn();
+    editor.addEventListener('input', onInput);
+    const { command, restore } = installExecCommand(editor);
+
+    try {
+      send({
+        type: 'gc-correcting',
+        target: 'content',
+        requestId: 'lexical',
+        original,
+      });
+      send({
+        type: 'gc-correct-result',
+        target: 'content',
+        requestId: 'lexical',
+        original,
+        corrected: 'experience',
+      });
+
+      expect(editor.textContent).toBe('Getting a new experience');
+      expect(command).toHaveBeenCalledExactlyOnceWith('insertText', false, 'experience');
+      expect(onInput).toHaveBeenCalledOnce();
+    } finally {
+      restore();
+    }
   });
 });

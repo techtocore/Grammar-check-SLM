@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { installExecCommand } from '../exec-command.test-helper';
 import { ContentEditableAdapter } from './contenteditable-adapter';
 
 function select(root: HTMLElement, anchor: number, focus = anchor): void {
@@ -64,5 +65,52 @@ describe('ContentEditableAdapter.applyEdit', () => {
     expect(adapter.applyEdit(5, 8, 'was', 'were')).toBe(true);
     expect(selectionOffsets(root)).toEqual([9, 9]);
     adapter.destroy();
+  });
+
+  it('uses the browser editing pipeline for a WhatsApp Lexical editor', () => {
+    const root = document.createElement('div');
+    root.setAttribute('contenteditable', 'true');
+    root.setAttribute('data-lexical-editor', 'true');
+    root.innerHTML = '<p><span data-lexical-text="true">Getting a new experrience</span></p>';
+    document.body.append(root);
+    const text = root.querySelector('[data-lexical-text]')?.firstChild;
+    if (!(text instanceof Text)) throw new Error('Expected Lexical text node');
+    const original = 'experrience';
+    const start = text.data.indexOf(original);
+    window.getSelection()?.setBaseAndExtent(text, start, text, start + original.length);
+    const onInput = vi.fn();
+    root.addEventListener('input', onInput);
+    const { command, restore } = installExecCommand(root);
+    const adapter = new ContentEditableAdapter(root);
+
+    try {
+      expect(adapter.applyEdit(start, start + original.length, original, 'experience')).toBe(true);
+      expect(root.textContent).toBe('Getting a new experience');
+      expect(command).toHaveBeenCalledExactlyOnceWith('insertText', false, 'experience');
+      expect(onInput).toHaveBeenCalledOnce();
+    } finally {
+      adapter.destroy();
+      restore();
+    }
+  });
+
+  it('uses the browser delete command for removal suggestions', () => {
+    const root = document.createElement('div');
+    root.setAttribute('contenteditable', 'true');
+    root.textContent = 'This is very good.';
+    document.body.append(root);
+    select(root, root.textContent.length);
+    const start = root.textContent.indexOf('very ');
+    const { command, restore } = installExecCommand(root);
+    const adapter = new ContentEditableAdapter(root);
+
+    try {
+      expect(adapter.applyEdit(start, start + 5, 'very ', '')).toBe(true);
+      expect(root.textContent).toBe('This is good.');
+      expect(command).toHaveBeenCalledExactlyOnceWith('delete', false);
+    } finally {
+      adapter.destroy();
+      restore();
+    }
   });
 });

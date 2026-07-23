@@ -5,6 +5,7 @@ import { initSelectionCorrection } from './selection';
 import { onContextInvalidated } from './lifecycle';
 import { createLogger } from '../shared/logger';
 import { isBackgroundSender, isContentMessage } from '../shared/messages';
+import { supportsContentUi } from './document-support';
 
 const log = createLogger('content');
 
@@ -38,6 +39,10 @@ function shouldRunInFrame(origin: string | null): boolean {
 }
 
 async function main(): Promise<void> {
+  // <all_urls> also injects into SVG/XML documents, where createElement('div')
+  // returns a generic Element without an HTML style declaration.
+  if (!supportsContentUi(document)) return;
+
   // Selection correction is explicitly user-triggered and works even where
   // automatic checking is disabled, including cross-origin subframes.
   initSelectionCorrection();

@@ -2,6 +2,8 @@
 // so word-level correction offsets can be turned into DOM Ranges and applied
 // without destroying the element's markup or the caret position.
 
+import { replaceContentEditableRange } from './contenteditable-edit';
+
 export interface CharPos {
   node: Text;
   offset: number;
@@ -9,6 +11,7 @@ export interface CharPos {
 }
 
 export interface DomText {
+  root: HTMLElement;
   text: string;
   /** For each char index in `text`: its DOM position, or null for a synthetic separator. */
   positions: Array<CharPos | null>;
@@ -130,7 +133,7 @@ export function buildDomText(root: HTMLElement): DomText {
     }
   }
 
-  return { text, positions, barriers };
+  return { root, text, positions, barriers };
 }
 
 function caretAfterLast(dom: DomText, index: number): CharPos | null {
@@ -231,28 +234,7 @@ export function applyDomEdit(
     return false;
   }
 
-  // Insertion (zero-width).
-  if (start === end) {
-    const at = caretBefore(dom, start) ?? caretAfterLast(dom, start - 1);
-    if (!at) return false;
-    at.node.data = at.node.data.slice(0, at.offset) + suggestion + at.node.data.slice(at.offset);
-    return true;
-  }
-
-  // Fast path: whole range within a single text node.
-  const startPos = dom.positions[start];
-  const endPos = dom.positions[end - 1];
-  if (startPos && endPos && startPos.node === endPos.node) {
-    const node = startPos.node;
-    node.data =
-      node.data.slice(0, startPos.offset) + suggestion + node.data.slice(endPos.offset + 1);
-    return true;
-  }
-
-  // Cross-node fallback.
   const range = resolveRange(dom, start, end);
   if (!range) return false;
-  range.deleteContents();
-  if (suggestion) range.insertNode(document.createTextNode(suggestion));
-  return true;
+  return replaceContentEditableRange(dom.root, range, suggestion);
 }

@@ -1,5 +1,6 @@
 import { isBackgroundSender, isContentMessage, type ContentMessage } from '../shared/messages';
 import { createLogger } from '../shared/logger';
+import { replaceContentEditableRange } from './fields/contenteditable-edit';
 
 const log = createLogger('content');
 
@@ -197,25 +198,8 @@ function replaceSelection(
     current.startOffset === range.startOffset &&
     current.endContainer === range.endContainer &&
     current.endOffset === range.endOffset;
-  range.deleteContents();
-  const replacement = document.createTextNode(corrected);
-  range.insertNode(replacement);
-  if (selection && selectionUnchanged) {
-    const caret = document.createRange();
-    caret.setStartAfter(replacement);
-    caret.collapse(true);
-    selection.removeAllRanges();
-    selection.addRange(caret);
-  }
-  host.dispatchEvent(
-    new InputEvent('input', {
-      bubbles: true,
-      composed: true,
-      inputType: 'insertReplacementText',
-      data: corrected,
-    }),
-  );
-  return 'replaced';
+  if (!selectionUnchanged) return 'stale';
+  return replaceContentEditableRange(host, range, corrected) ? 'replaced' : 'stale';
 }
 
 function handleResult(message: CorrectResult): void {

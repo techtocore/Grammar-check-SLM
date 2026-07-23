@@ -86,14 +86,6 @@ export class ContentEditableAdapter implements FieldAdapter {
   }
 
   applyEdit(start: number, end: number, expectedOriginal: string, suggestion: string): boolean {
-    const before = new InputEvent('beforeinput', {
-      bubbles: true,
-      composed: true,
-      cancelable: true,
-      inputType: 'insertReplacementText',
-      data: suggestion,
-    });
-    if (!this.element.dispatchEvent(before)) return false;
     this.dom = buildDomText(this.element);
     const selection = window.getSelection();
     const selectionOffsets =
@@ -141,14 +133,6 @@ export class ContentEditableAdapter implements FieldAdapter {
           );
         }
       }
-      this.element.dispatchEvent(
-        new InputEvent('input', {
-          bubbles: true,
-          composed: true,
-          inputType: 'insertReplacementText',
-          data: suggestion,
-        }),
-      );
     }
     return ok;
   }
