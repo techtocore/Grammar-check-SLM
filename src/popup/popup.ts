@@ -19,6 +19,7 @@ import { promptApiLanguageOptions } from '../shared/prompt-language';
 import type { PendingCorrection } from '../shared/pending';
 import type { EditorDraft } from '../shared/editor-draft';
 import { applyCorrections, type Correction } from '../core';
+import { buildEditorDiff } from './editor-diff';
 
 function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -295,25 +296,6 @@ function updateEditorHint(): void {
   else setHint('Checking…');
 }
 
-interface DiffPart {
-  text: string;
-  changed: boolean;
-}
-
-function buildDiff(text: string, corrections: readonly Correction[]): DiffPart[] {
-  const sorted = [...corrections].sort((a, b) => a.start - b.start || a.end - b.end);
-  const parts: DiffPart[] = [];
-  let cursor = 0;
-  for (const c of sorted) {
-    if (c.start < cursor) continue; // ignore any overlap defensively
-    if (c.start > cursor) parts.push({ text: text.slice(cursor, c.start), changed: false });
-    if (c.suggestion) parts.push({ text: c.suggestion, changed: true });
-    cursor = Math.max(cursor, c.end);
-  }
-  if (cursor < text.length) parts.push({ text: text.slice(cursor), changed: false });
-  return parts;
-}
-
 function renderResult(
   text: string,
   corrections: Correction[],
@@ -332,12 +314,12 @@ function renderResult(
 
   const body = el('result-body');
   body.replaceChildren(
-    ...buildDiff(text, corrections).map((part) => {
-      if (!part.changed) return document.createTextNode(part.text);
-      const mark = document.createElement('mark');
-      mark.className = 'diff-add';
-      mark.textContent = part.text;
-      return mark;
+    ...buildEditorDiff(text, corrections).map((part) => {
+      if (part.kind === 'unchanged') return document.createTextNode(part.text);
+      const element = document.createElement(part.kind === 'deletion' ? 'del' : 'mark');
+      element.className = part.kind === 'deletion' ? 'diff-remove' : 'diff-add';
+      element.textContent = part.text;
+      return element;
     }),
   );
 

@@ -29,7 +29,7 @@ MIT License
 BSD 3-Clause License
 --------------------
 
-- protobufjs 7.6.4 and its @protobufjs helper packages,
+- protobufjs 7.6.5 and its @protobufjs helper packages,
     Copyright Daniel Wirtz and contributors
     (licenses/PROTOBUFJS-BSD-3-CLAUSE.txt)
 

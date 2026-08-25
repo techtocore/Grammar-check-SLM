@@ -12,7 +12,9 @@ import {
 import type { ModelStatus, RunnerConfig } from '../shared/messages';
 import { createLogger } from '../shared/logger';
 import { promptApiLanguageOptions } from '../shared/prompt-language';
+import { progressPercentage } from '../shared/progress';
 import {
+  deleteModelCache,
   getCompletedModelDevices,
   markModelDownloadComplete,
   markModelDownloadStarted,
@@ -158,6 +160,48 @@ async function orderedDeviceCandidates(
   ];
 }
 
+async function completedDevices(modelId: string): Promise<Set<'webgpu' | 'wasm'>> {
+  return new Set(
+    await getCompletedModelDevices(modelId).catch((error: unknown) => {
+      log.warn('Could not inspect cached model backends.', error);
+      return [];
+    }),
+  );
+}
+
+async function preferCachedLegacyPreset(
+  preset: ModelPreset,
+  candidates: readonly ('webgpu' | 'wasm')[],
+): Promise<ModelPreset> {
+  if (!preset.legacyModelIds?.length) return preset;
+  const current = await completedDevices(preset.modelId);
+  if (candidates.some((device) => current.has(device))) return preset;
+
+  for (const modelId of preset.legacyModelIds) {
+    const completed = await completedDevices(modelId);
+    if (candidates.some((device) => completed.has(device))) {
+      log.info(`Using cached legacy model ${modelId} until ${preset.modelId} is downloaded.`);
+      return { ...preset, modelId, legacyModelIds: [] };
+    }
+  }
+  return preset;
+}
+
+async function recordCompletedModel(preset: ModelPreset, device: 'webgpu' | 'wasm'): Promise<void> {
+  try {
+    await markModelDownloadComplete(preset.modelId, device);
+  } catch (error) {
+    log.warn('Could not record the completed model cache.', error);
+    return;
+  }
+
+  for (const legacyModelId of preset.legacyModelIds ?? []) {
+    await deleteModelCache(legacyModelId).catch((error: unknown) =>
+      log.warn(`Could not remove superseded model cache ${legacyModelId}.`, error),
+    );
+  }
+}
+
 function dtypeCandidates(preset: ModelPreset, device: 'webgpu' | 'wasm'): DTypeConfig[] {
   const preferred = preset.dtype[device];
   if (typeof preferred !== 'string') return [preferred];
@@ -283,7 +327,11 @@ export class TransformersBackend implements Backend {
     if (config.device === 'webgpu' && !hasWebGPU) {
       throw new Error('WebGPU is not available on this device.');
     }
-    const preset = resolvePreset(config.model, hasWebGPU && config.device !== 'wasm');
+    const resolvedPreset = resolvePreset(config.model, hasWebGPU && config.device !== 'wasm');
+    const supportedDevices = deviceCandidates(config.device, hasWebGPU).filter(
+      (device) => !resolvedPreset.requiresWebGPU || device === 'webgpu',
+    );
+    const preset = await preferCachedLegacyPreset(resolvedPreset, supportedDevices);
     const devices = await orderedDeviceCandidates(config.device, hasWebGPU, preset);
     await markModelDownloadStarted(preset.modelId, config.device);
     const expectedBytes = preset.approxDownloadMB * 1024 * 1024;
@@ -301,9 +349,7 @@ export class TransformersBackend implements Backend {
           });
           this.generator = generator;
           this.preset = preset;
-          await markModelDownloadComplete(preset.modelId, device).catch((error: unknown) =>
-            log.warn('Could not record the completed model cache.', error),
-          );
+          await recordCompletedModel(preset, device);
           return { label: preset.label, modelId: preset.modelId, device };
         } catch (error) {
           lastError = error;
@@ -380,7 +426,7 @@ export async function downloadTransformersModel(
             onProgress(aggregator.update(raw));
         });
         await generator.dispose?.();
-        await markModelDownloadComplete(preset.modelId, device);
+        await recordCompletedModel(preset, device);
         return;
       } catch (error) {
         lastError = error;
@@ -430,8 +476,8 @@ export class PromptApiBackend implements Backend {
       ...this.createOptions,
       monitor(monitor) {
         monitor.addEventListener('downloadprogress', (event) => {
-          const loaded = (event as ProgressEvent).loaded;
-          onProgress(Math.min(99, Math.round(loaded * 100)), 'Chrome built-in AI', 'built-in');
+          const progress = Math.min(99, progressPercentage(event as ProgressEvent));
+          onProgress(progress, 'Chrome built-in AI', 'built-in');
         });
       },
     });

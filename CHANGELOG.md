@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-08-25
+
+### Added
+
+- Semantic added/removed text in the built-in editor diff, including visible
+  delete-only corrections.
+- A model update indicator and one-click migration for superseded local-model
+  caches, without disrupting offline use.
+- Regression coverage for ratio- and byte-based download progress, editor diff
+  rendering, optimized model metadata, and cache-marker failures.
+
+### Changed
+
+- Moved Qwen3.5 0.8B to its upstream-recommended optimized ONNX export while
+  preserving the existing model preset, settings, and offline legacy caches
+  until the replacement is downloaded.
+- Refreshed the TypeScript, ESLint, Prettier, Vitest, Webpack, Chrome typing,
+  and GitHub Actions toolchain to current compatible releases.
+- Updated security-sensitive transitive dependencies; `npm audit` now reports
+  no known vulnerabilities.
+
+### Fixed
+
+- Chrome AI setup progress now handles both ratio-style and standard byte
+  progress events and always stays within 0–100%.
+- A failed model-cache completion marker no longer causes successfully loaded
+  weights to be loaded repeatedly with every fallback quantization.
+
 ## [1.1.0] — 2026-07-22
 
 ### Added

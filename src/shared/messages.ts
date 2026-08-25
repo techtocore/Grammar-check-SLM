@@ -56,6 +56,8 @@ export interface ModelInfo {
   requiresWebGPU: boolean;
   cached: boolean;
   partial: boolean;
+  /** A completed legacy cache is usable, but the current export is not downloaded yet. */
+  updateAvailable: boolean;
   active: boolean;
   download?: ModelDownloadStatus;
 }

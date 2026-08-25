@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { defaultPresetForDevice, getPreset, MODEL_PRESETS, resolvePreset } from './models';
+import {
+  defaultPresetForDevice,
+  getPreset,
+  modelCacheIds,
+  MODEL_PRESETS,
+  resolvePreset,
+} from './models';
 
 describe('model catalogue', () => {
   it('offers only the current recommended model and a low-memory fallback', () => {
@@ -19,6 +25,8 @@ describe('model catalogue', () => {
 
   it('uses the browser-verified mixed precision for Qwen3.5', () => {
     expect(getPreset('qwen3.5-0.8b')).toMatchObject({
+      modelId: 'onnx-community/Qwen3.5-0.8B-ONNX-OPT',
+      legacyModelIds: ['onnx-community/Qwen3.5-0.8B-ONNX'],
       approxDownloadMB: 1000,
       requiresWebGPU: true,
       dtype: {
@@ -29,5 +37,9 @@ describe('model catalogue', () => {
         },
       },
     });
+    expect(modelCacheIds(getPreset('qwen3.5-0.8b')!)).toEqual([
+      'onnx-community/Qwen3.5-0.8B-ONNX-OPT',
+      'onnx-community/Qwen3.5-0.8B-ONNX',
+    ]);
   });
 });

@@ -22,7 +22,7 @@ import {
   setSiteEnabled,
   type Settings,
 } from '../shared/settings';
-import { MODEL_PRESETS, resolvePreset } from '../shared/models';
+import { modelCacheIds, MODEL_PRESETS, resolvePreset } from '../shared/models';
 import { listModelCacheInfo } from '../shared/model-cache';
 import {
   clearPendingCorrection,
@@ -321,28 +321,31 @@ async function handleRetry(): Promise<ModelStatus> {
 async function handleModelsList(): Promise<ModelInfo[]> {
   const settings = await loadSettings();
   const cachePreference = await cachePreferenceFor(settings.device);
+  const cacheIds = MODEL_PRESETS.flatMap((preset) => modelCacheIds(preset));
   const [cacheInfo, downloadStatuses] = await Promise.all([
-    listModelCacheInfo(
-      MODEL_PRESETS.map((preset) => preset.modelId),
-      cachePreference,
-    ),
+    listModelCacheInfo(cacheIds, cachePreference),
     handleDownloadStatuses(),
   ]);
   const downloadsByModel = new Map(downloadStatuses.map((status) => [status.modelId, status]));
   const localActive = settings.backend !== 'prompt';
   const activeModel = resolvePreset(settings.model, cachePreference !== 'wasm').id;
-  return MODEL_PRESETS.map((preset) => ({
-    id: preset.id,
-    modelId: preset.modelId,
-    label: preset.label,
-    description: preset.description,
-    approxDownloadMB: preset.approxDownloadMB,
-    requiresWebGPU: preset.requiresWebGPU ?? false,
-    cached: cacheInfo[preset.modelId]?.cached ?? false,
-    partial: cacheInfo[preset.modelId]?.partial ?? false,
-    active: localActive && activeModel === preset.id,
-    download: downloadsByModel.get(preset.modelId),
-  }));
+  return MODEL_PRESETS.map((preset) => {
+    const currentCacheInfo = cacheInfo[preset.modelId];
+    const legacyCacheInfo = (preset.legacyModelIds ?? []).map((modelId) => cacheInfo[modelId]);
+    return {
+      id: preset.id,
+      modelId: preset.modelId,
+      label: preset.label,
+      description: preset.description,
+      approxDownloadMB: preset.approxDownloadMB,
+      requiresWebGPU: preset.requiresWebGPU ?? false,
+      cached: Boolean(currentCacheInfo?.cached) || legacyCacheInfo.some((info) => info?.cached),
+      partial: Boolean(currentCacheInfo?.partial) || legacyCacheInfo.some((info) => info?.partial),
+      updateAvailable: !currentCacheInfo?.cached && legacyCacheInfo.some((info) => info?.cached),
+      active: localActive && activeModel === preset.id,
+      download: downloadsByModel.get(preset.modelId),
+    };
+  });
 }
 
 async function cachePreferenceFor(preference: Settings['device']): Promise<Settings['device']> {

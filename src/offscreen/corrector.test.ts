@@ -289,7 +289,7 @@ describe('Corrector', () => {
       hasObsoleteRunnerLoading: false,
     });
     expect(
-      corrector.selectOnboardingTarget('onnx-community/Qwen3.5-0.8B-ONNX', 'wasm'),
+      corrector.selectOnboardingTarget('onnx-community/Qwen3.5-0.8B-ONNX-OPT', 'wasm'),
     ).toMatchObject({
       hasMatchingRunnerLoading: false,
       hasObsoleteRunnerLoading: true,
@@ -350,6 +350,7 @@ describe('Corrector', () => {
     vi.stubGlobal('chrome', {
       runtime: { sendMessage: vi.fn(() => Promise.resolve()) },
     });
+
     let finishFirst: (() => void) | undefined;
     const download = vi.mocked(downloadTransformersModel);
     download.mockImplementation((preset) => {
@@ -365,12 +366,12 @@ describe('Corrector', () => {
     const first = corrector.downloadModel('onnx-community/Qwen3-0.6B-ONNX', 'wasm', 'onboarding');
     await vi.waitFor(() => expect(download).toHaveBeenCalledOnce());
     const superseded = corrector.downloadModel(
-      'onnx-community/Qwen3.5-0.8B-ONNX',
+      'onnx-community/Qwen3.5-0.8B-ONNX-OPT',
       'wasm',
       'onboarding',
     );
     const latest = corrector.downloadModel(
-      'onnx-community/Qwen3.5-0.8B-ONNX',
+      'onnx-community/Qwen3.5-0.8B-ONNX-OPT',
       'webgpu',
       'onboarding',
     );
@@ -380,9 +381,20 @@ describe('Corrector', () => {
 
     expect(download.mock.calls.map(([preset]) => preset.modelId)).toEqual([
       'onnx-community/Qwen3-0.6B-ONNX',
-      'onnx-community/Qwen3.5-0.8B-ONNX',
+      'onnx-community/Qwen3.5-0.8B-ONNX-OPT',
     ]);
     expect(corrector.getDownloadStatuses()).toEqual([]);
+  });
+
+  it('deletes superseded cache namespaces with the current model', async () => {
+    vi.mocked(deleteModelCache).mockResolvedValueOnce(2).mockResolvedValueOnce(3);
+    const corrector = new Corrector(vi.fn());
+
+    await expect(corrector.deleteModel('onnx-community/Qwen3.5-0.8B-ONNX-OPT')).resolves.toBe(5);
+    expect(vi.mocked(deleteModelCache).mock.calls).toEqual([
+      ['onnx-community/Qwen3.5-0.8B-ONNX-OPT'],
+      ['onnx-community/Qwen3.5-0.8B-ONNX'],
+    ]);
   });
 
   it('cancels a queued model when onboarding switches back to the active download', async () => {
@@ -402,7 +414,7 @@ describe('Corrector', () => {
     const first = corrector.downloadModel('onnx-community/Qwen3-0.6B-ONNX', 'wasm', 'onboarding');
     await vi.waitFor(() => expect(download).toHaveBeenCalledOnce());
     const queued = corrector.downloadModel(
-      'onnx-community/Qwen3.5-0.8B-ONNX',
+      'onnx-community/Qwen3.5-0.8B-ONNX-OPT',
       'wasm',
       'onboarding',
     );
@@ -443,9 +455,13 @@ describe('Corrector', () => {
 
     const blocker = corrector.downloadModel('onnx-community/Qwen3-0.6B-ONNX', 'wasm');
     await vi.waitFor(() => expect(download).toHaveBeenCalledOnce());
-    const wasm = corrector.downloadModel('onnx-community/Qwen3.5-0.8B-ONNX', 'wasm', 'onboarding');
+    const wasm = corrector.downloadModel(
+      'onnx-community/Qwen3.5-0.8B-ONNX-OPT',
+      'wasm',
+      'onboarding',
+    );
     const webgpu = corrector.downloadModel(
-      'onnx-community/Qwen3.5-0.8B-ONNX',
+      'onnx-community/Qwen3.5-0.8B-ONNX-OPT',
       'webgpu',
       'onboarding',
     );
@@ -456,7 +472,7 @@ describe('Corrector', () => {
       download.mock.calls.map(([preset, _onProgress, device]) => [preset.modelId, device]),
     ).toEqual([
       ['onnx-community/Qwen3-0.6B-ONNX', 'wasm'],
-      ['onnx-community/Qwen3.5-0.8B-ONNX', 'webgpu'],
+      ['onnx-community/Qwen3.5-0.8B-ONNX-OPT', 'webgpu'],
     ]);
   });
 

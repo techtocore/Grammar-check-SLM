@@ -447,6 +447,14 @@ textarea:focus-visible {
   font-weight: 600;
 }
 
+.diff-remove {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  border-radius: 3px;
+  padding: 0 2px;
+  text-decoration-thickness: 1.5px;
+}
+
 /* ---------- Controls (status + toggles) ---------- */
 
 .card {
@@ -848,6 +856,11 @@ textarea:focus-visible {
   .diff-add {
     background: color-mix(in srgb, var(--success) 18%, transparent);
     color: var(--success);
+  }
+
+  .diff-remove {
+    background: color-mix(in srgb, var(--danger) 16%, transparent);
+    color: var(--danger);
   }
 }
 

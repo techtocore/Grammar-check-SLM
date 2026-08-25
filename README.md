@@ -6,7 +6,6 @@
 ![AI: 100% on-device](https://img.shields.io/badge/AI-100%25%20on--device-10B981)
 ![Chrome Web Store Version](https://img.shields.io/chrome-web-store/v/lohelopgomgjmabihgmcdpnmckjpdbhd)
 
-
 A privacy-first [Chromium extension](https://chromewebstore.google.com/detail/lohelopgomgjmabihgmcdpnmckjpdbhd?utm_source=item-share-cb) that fixes grammar and spelling **entirely on your device**. It
 uses a downloaded **Qwen** model via
 [Transformers.js](https://github.com/huggingface/transformers.js) by default. Chrome's **built-in AI
@@ -27,8 +26,8 @@ weights download once during setup and are then cached for offline use.
   **sentence-aware** checking (`Intl.Segmenter`) with caching never re-processes unchanged text.
 - 🎨 **No caret jumps** — non-destructive **CSS Custom Highlight API** for rich text, a positioned
   overlay for inputs.
-- ✍️ **Built-in editor** — paste a sentence or paragraph for an instant diff view, automatic local
-  draft recovery, a full-page editing mode, and one-click **copy**.
+- ✍️ **Built-in editor** — paste a sentence or paragraph for a semantic added/removed diff,
+  automatic local draft recovery, a full-page editing mode, and one-click **copy**.
 - 🖱️ **Right-click to correct** — select text anywhere to fix it in place, or copy the corrected
   version for read-only text.
 - 🛠️ **Configurable** — engine, model, acceleration, typing delay, fields, and per-site rules.
@@ -106,13 +105,12 @@ result for read-only text).
 
 ![Extension settings](/assets/settings.png)
 
-
 ### Engines
 
 - **Local models (Transformers.js)** — the default engine prepared and verified during first-run
   setup. `Recommended for this device` selects **Qwen3.5 0.8B** with WebGPU or **Qwen3 0.6B** with
-  WASM. Qwen3.5 uses a verified mixed-precision configuration and requires WebGPU; Qwen3 0.6B is the
-  compatible choice for older or memory-constrained devices.
+  WASM. Qwen3.5 uses the current optimized ONNX export with a verified mixed-precision configuration
+  and requires WebGPU; Qwen3 0.6B is the compatible choice for older or memory-constrained devices.
 - **Automatic engine** — uses Chrome built-in AI only when Gemini Nano is already ready, otherwise
   it immediately uses the selected local model. It never starts a Chrome AI download during a tab
   grammar check.

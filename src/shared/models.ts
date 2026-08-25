@@ -11,6 +11,8 @@ export interface ModelPreset {
   id: string;
   /** Hugging Face repo id passed to Transformers.js. */
   modelId: string;
+  /** Previous repo ids whose completed caches remain valid as an offline fallback. */
+  legacyModelIds?: readonly string[];
   label: string;
   description: string;
   task: ModelTask;
@@ -26,9 +28,10 @@ export const AUTO_MODEL = 'auto';
 export const MODEL_PRESETS: readonly ModelPreset[] = [
   {
     id: 'qwen3.5-0.8b',
-    modelId: 'onnx-community/Qwen3.5-0.8B-ONNX',
+    modelId: 'onnx-community/Qwen3.5-0.8B-ONNX-OPT',
+    legacyModelIds: ['onnx-community/Qwen3.5-0.8B-ONNX'],
     label: 'Qwen3.5 0.8B · WebGPU',
-    description: 'Latest balanced model for modern devices with WebGPU.',
+    description: 'Optimized current model for modern devices with WebGPU.',
     task: 'text-generation',
     approxDownloadMB: 1000,
     dtype: {
@@ -54,6 +57,11 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
 
 export function getPreset(id: string): ModelPreset | undefined {
   return MODEL_PRESETS.find((preset) => preset.id === id);
+}
+
+/** All cache namespaces owned by a preset, newest first. */
+export function modelCacheIds(preset: ModelPreset): readonly string[] {
+  return [preset.modelId, ...(preset.legacyModelIds ?? [])];
 }
 
 /** Uses the newest practical model on WebGPU and the smaller model on WASM. */

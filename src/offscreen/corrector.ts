@@ -10,7 +10,7 @@ import type {
   RunnerConfig,
 } from '../shared/messages';
 import { broadcastDownload } from '../shared/messages';
-import { getPreset, MODEL_PRESETS, resolvePreset } from '../shared/models';
+import { getPreset, modelCacheIds, MODEL_PRESETS, resolvePreset } from '../shared/models';
 import { createLogger } from '../shared/logger';
 import { deleteModelCache } from '../shared/model-cache';
 import {
@@ -422,7 +422,13 @@ export class Corrector {
 
     this.downloadStatusOwners.delete(preset.modelId);
     this.downloadStatuses.delete(preset.modelId);
-    return this.runExclusive(() => deleteModelCache(preset.modelId));
+    return this.runExclusive(async () => {
+      let deleted = 0;
+      for (const cacheId of modelCacheIds(preset)) {
+        deleted += await deleteModelCache(cacheId);
+      }
+      return deleted;
+    });
   }
 
   private isCurrentOnboardingTarget(modelId: string, device: RunnerConfig['device']): boolean {

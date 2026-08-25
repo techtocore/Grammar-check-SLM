@@ -9,6 +9,7 @@ import {
 import { onSettingsChanged, runnerSettingsKey, type Settings } from '../shared/settings';
 import { AUTO_MODEL, getPreset, MODEL_PRESETS } from '../shared/models';
 import { promptApiLanguageOptions } from '../shared/prompt-language';
+import { progressPercentage } from '../shared/progress';
 import {
   completeFirstRunSetup,
   FIRST_RUN_QUERY_PARAM,
@@ -198,6 +199,12 @@ function renderModels(): void {
       cachedBadge.textContent = 'Downloaded';
       title.append(cachedBadge);
     }
+    if (model.updateAvailable) {
+      const updateBadge = document.createElement('span');
+      updateBadge.className = 'badge partial';
+      updateBadge.textContent = 'Update available';
+      title.append(updateBadge);
+    }
     if (model.partial) {
       const partialBadge = document.createElement('span');
       partialBadge.className = 'badge partial';
@@ -232,9 +239,9 @@ function renderModels(): void {
       if (!model.active) {
         actions.append(button('Use', 'use', () => saveFromUi({ model: model.id })));
       }
-      if (!model.cached) {
+      if (!model.cached || model.updateAvailable) {
         actions.append(
-          button('Download', 'download', () => {
+          button(model.updateAvailable ? 'Update' : 'Download', 'download', () => {
             void startModelDownload(model);
           }),
         );
@@ -713,11 +720,9 @@ function initBuiltinAi(): void {
           ...promptApiLanguageOptions(settings?.language),
           monitor(monitor) {
             monitor.addEventListener('downloadprogress', (event) => {
-              bar.style.width = `${Math.round((event as ProgressEvent).loaded * 100)}%`;
-              progressWrap.setAttribute(
-                'aria-valuenow',
-                String(Math.round((event as ProgressEvent).loaded * 100)),
-              );
+              const progress = progressPercentage(event as ProgressEvent);
+              bar.style.width = `${progress}%`;
+              progressWrap.setAttribute('aria-valuenow', String(progress));
             });
           },
         });
