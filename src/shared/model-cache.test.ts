@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   deleteModelCache,
   getCompletedModelDevices,
+  listCompletedModelDevices,
   listCachedModels,
   listModelCacheInfo,
   markModelDownloadComplete,
@@ -46,6 +47,10 @@ describe('model cache completion markers', () => {
       [MODEL_ID]: { cached: true, partial: false },
     });
     await expect(getCompletedModelDevices(MODEL_ID)).resolves.toEqual(['wasm']);
+    await expect(listCompletedModelDevices([MODEL_ID, 'missing-model'])).resolves.toEqual({
+      [MODEL_ID]: ['wasm'],
+      'missing-model': [],
+    });
     await expect(listModelCacheInfo([MODEL_ID], 'auto')).resolves.toEqual({
       [MODEL_ID]: { cached: true, partial: false },
     });
@@ -137,5 +142,29 @@ describe('model cache completion markers', () => {
     await expect(listModelCacheInfo([MODEL_ID], 'wasm')).resolves.toEqual({
       [MODEL_ID]: { cached: false, partial: false },
     });
+  });
+
+  it('does not trust a completion marker after the model weights were evicted', async () => {
+    const urls = new Set<string>();
+    const requestUrl = (request: RequestInfo | URL): string => {
+      if (typeof request === 'string') return request;
+      if ('url' in request) return request.url;
+      return request.toString();
+    };
+    const cache = {
+      keys: vi.fn(() => Promise.resolve([...urls].map((url) => ({ url })))),
+      delete: vi.fn((request: RequestInfo | URL) =>
+        Promise.resolve(urls.delete(requestUrl(request))),
+      ),
+      put: vi.fn((request: RequestInfo | URL) => {
+        urls.add(requestUrl(request));
+        return Promise.resolve();
+      }),
+    };
+    vi.stubGlobal('caches', { open: vi.fn(() => Promise.resolve(cache)) });
+
+    await markModelDownloadComplete(MODEL_ID, 'wasm');
+
+    await expect(getCompletedModelDevices(MODEL_ID)).resolves.toEqual([]);
   });
 });

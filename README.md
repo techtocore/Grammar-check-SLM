@@ -21,6 +21,8 @@ weights download once during setup and are then cached for offline use.
   and memory-constrained devices.
 - ⚡ **Optional Chrome AI** — Automatic uses **Gemini Nano** only when it is already ready, without
   interrupting checks to download it.
+- 🌱 **Adaptive readiness** — recently used, already-downloaded models warm during a browser-idle
+  window after restart, typing intent refreshes them early, and memory is released after inactivity.
 - ✒️ **Real-world fields** — rich-text (`contenteditable`) **and** `<textarea>` / `<input>`.
 - 🎯 **Precise fixes** — a word-level **LCS diff** maps each correction to an exact text range, and
   **sentence-aware** checking (`Intl.Segmenter`) with caching never re-processes unchanged text.
@@ -112,10 +114,24 @@ result for read-only text).
   WASM. Qwen3.5 uses the current optimized ONNX export with a verified mixed-precision configuration
   and requires WebGPU; Qwen3 0.6B is the compatible choice for older or memory-constrained devices.
 - **Automatic engine** — uses Chrome built-in AI only when Gemini Nano is already ready, otherwise
-  it immediately uses the selected local model. It never starts a Chrome AI download during a tab
-  grammar check.
+  it immediately uses the selected local model. Automatic local selection prefers a compatible
+  model that is already downloaded before considering a new download. It never starts a Chrome AI
+  download during a tab grammar check.
 - **Chrome built-in AI (Prompt API / Gemini Nano)** — optional. Chrome manages and shares this model
   across the browser. Settings provides its explicit one-time **Set up** action when supported.
+
+### Readiness and resource use
+
+- After browser restart, active users get an early warmup only after Chrome reports an idle window.
+  This uses ready Chrome AI or a fully cached local model and is strictly offline: startup and field
+  focus never initiate model downloads.
+- Focusing or typing in an eligible field sends a coalesced cache-only warmup hint, so model
+  initialization overlaps the typing delay instead of blocking the first correction.
+- A real grammar check may restore a missing or browser-evicted local model, because checking cannot
+  run without its weights. Explicit model choices are honored; Automatic reuses a compatible cached
+  model first to avoid unnecessary bandwidth.
+- After five minutes without grammar activity, the model session and offscreen runner are released
+  to return GPU/WASM memory to the browser. Active or queued checks are never interrupted.
 
 ## 🧪 Development
 

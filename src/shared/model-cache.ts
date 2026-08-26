@@ -8,6 +8,7 @@ const CACHE_NAME = 'transformers-cache';
 const MARKER_ROOT = '__grammar_slm_model_cache__';
 type LocalDevice = Exclude<DevicePreference, 'auto'>;
 const LOCAL_DEVICES: readonly LocalDevice[] = ['webgpu', 'wasm'];
+export type CompletedModelDevices = Record<string, LocalDevice[]>;
 
 export interface ModelCacheInfo {
   cached: boolean;
@@ -61,12 +62,27 @@ async function openModelCache(): Promise<Cache> {
   return store.open(CACHE_NAME);
 }
 
-/** Returns concrete backends that have completed successfully for this model. */
-export async function getCompletedModelDevices(modelId: string): Promise<LocalDevice[]> {
+/** Returns completed backends for multiple models with a single cache scan. */
+export async function listCompletedModelDevices(
+  modelIds: readonly string[],
+): Promise<CompletedModelDevices> {
+  const result: CompletedModelDevices = Object.fromEntries(modelIds.map((id) => [id, []]));
   const cache = await openModelCache();
   const urls = (await cache.keys()).map((request) => request.url);
-  if (urls.includes(deletingMarkerUrl(modelId))) return [];
-  return LOCAL_DEVICES.filter((device) => urls.includes(completeMarkerUrl(modelId, device)));
+  for (const modelId of modelIds) {
+    const needle = `/${modelId}/`;
+    const hasWeights = urls.some((url) => url.includes(needle) && url.includes('.onnx'));
+    if (!hasWeights || urls.includes(deletingMarkerUrl(modelId))) continue;
+    result[modelId] = LOCAL_DEVICES.filter((device) =>
+      urls.includes(completeMarkerUrl(modelId, device)),
+    );
+  }
+  return result;
+}
+
+/** Returns concrete backends that have completed successfully for this model. */
+export async function getCompletedModelDevices(modelId: string): Promise<LocalDevice[]> {
+  return (await listCompletedModelDevices([modelId]))[modelId] ?? [];
 }
 
 /** Marks a model download as in-progress so partial files are never reported as ready. */

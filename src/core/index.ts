@@ -6,6 +6,7 @@ export { LRUCache } from './cache';
 export { escapeHtml, escapeRegExp } from './sanitize';
 export {
   buildMessages,
+  buildCorrectionRequest,
   buildT5Prompt,
   cleanModelOutput,
   GRAMMAR_SYSTEM_PROMPT,

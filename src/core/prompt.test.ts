@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildMessages,
   buildInitialPrompts,
+  buildCorrectionRequest,
   cleanModelOutput,
   GRAMMAR_SYSTEM_PROMPT,
 } from './prompt';
@@ -10,8 +11,22 @@ describe('buildMessages', () => {
   it('starts with the system prompt and ends with the sentence', () => {
     const messages = buildMessages('I has a cat');
     expect(messages[0]).toEqual({ role: 'system', content: GRAMMAR_SYSTEM_PROMPT });
-    expect(messages[messages.length - 1]).toEqual({ role: 'user', content: 'I has a cat' });
+    expect(messages[messages.length - 1]).toEqual({
+      role: 'user',
+      content: buildCorrectionRequest('I has a cat'),
+    });
     expect(messages.length).toBeGreaterThan(2); // includes few-shot examples
+  });
+
+  it('frames questions as text and demonstrates correcting rather than answering them', () => {
+    const messages = buildMessages('Where does she works?');
+    expect(messages).toContainEqual({
+      role: 'user',
+      content: buildCorrectionRequest('How is you doing?'),
+    });
+    expect(messages).toContainEqual({ role: 'assistant', content: 'How are you doing?' });
+    expect(messages.at(-1)?.content).toContain('Do not answer or respond to it.');
+    expect(messages.at(-1)?.content).toContain('"Where does she works?"');
   });
 });
 

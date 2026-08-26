@@ -22,7 +22,7 @@ import {
   setSiteEnabled,
   type Settings,
 } from '../shared/settings';
-import { modelCacheIds, MODEL_PRESETS, resolvePreset } from '../shared/models';
+import { AUTO_MODEL, modelCacheIds, MODEL_PRESETS, resolvePreset } from '../shared/models';
 import { listModelCacheInfo } from '../shared/model-cache';
 import {
   clearPendingCorrection,
@@ -40,6 +40,20 @@ import { createLogger } from '../shared/logger';
 import { handleFirstRunInstall } from './first-run';
 import { activateExistingTabs } from './tab-activation';
 import { assertSetupVerified, SETUP_PROBE } from './setup-verification';
+import {
+  DOWNLOAD_IDLE_MINUTES,
+  MAX_STARTUP_WARMUP_ATTEMPTS,
+  RUNNER_IDLE_ALARM,
+  RUNNER_IDLE_MINUTES,
+  STARTUP_IDLE_THRESHOLD_SECONDS,
+  STARTUP_RETRY_DELAY_MINUTES,
+  STARTUP_WARMUP_ALARM_PREFIX,
+  STARTUP_WARMUP_DELAY_MINUTES,
+  startupWarmupAlarm,
+  startupWarmupAttempt,
+  usedRecently,
+} from './resource-policy';
+import { lastGrammarActivity, recordGrammarActivity } from './usage';
 
 const log = createLogger('background');
 
@@ -49,6 +63,26 @@ const CONTEXT_MENU_CORRECT = 'gcslm-correct-selection';
 let lastStatus: ModelStatus | null = null;
 let settingsGeneration = 0;
 let settingsMutation: Promise<void> = Promise.resolve();
+let runnerActivityGeneration = 0;
+
+function scheduleRunnerRelease(delayInMinutes = RUNNER_IDLE_MINUTES): void {
+  runnerActivityGeneration++;
+  void chrome.alarms.create(RUNNER_IDLE_ALARM, { delayInMinutes });
+}
+
+function clearRunnerRelease(): void {
+  runnerActivityGeneration++;
+  void chrome.alarms.clear(RUNNER_IDLE_ALARM);
+}
+
+function noteRunnerActivity(persist: boolean, delayInMinutes = RUNNER_IDLE_MINUTES): void {
+  scheduleRunnerRelease(delayInMinutes);
+  if (persist) {
+    void recordGrammarActivity().catch((error: unknown) =>
+      log.warn('Could not record recent grammar-check activity.', error),
+    );
+  }
+}
 
 function runnerConfig(settings: Settings): RunnerConfig {
   return {
@@ -136,6 +170,7 @@ async function handleCheck(
       configKey,
     };
   }
+  noteRunnerActivity(true);
   await ensureConfigured(settings);
   await settingsMutation;
   const latestConfigKey = checkConfigKey(await loadSettings(), origin);
@@ -174,6 +209,7 @@ async function handleCorrect(
   if (expectedConfigKey && expectedConfigKey !== configKey) {
     return changedConfigurationResult(text, requestId, configKey);
   }
+  noteRunnerActivity(true);
   await ensureConfigured(settings);
   await settingsMutation;
   const latestConfigKey = runnerConfigKey(await loadSettings());
@@ -235,8 +271,13 @@ async function handleWarmup(): Promise<ModelStatus> {
   if (!settings.enabled) {
     return { state: 'disabled', progress: 0, modelId: '', device: 'unknown' };
   }
+  noteRunnerActivity(false);
   await ensureConfigured(settings);
-  const status = await sendToOffscreen<ModelStatus>({ type: 'warmup', target: 'offscreen' });
+  const status = await sendToOffscreen<ModelStatus>({
+    type: 'warmup',
+    target: 'offscreen',
+    cacheOnly: true,
+  });
   lastStatus = status;
   return status;
 }
@@ -275,13 +316,18 @@ async function syncRunnerAfterSettings(
   patch: Partial<Settings>,
 ): Promise<void> {
   if (!settings.enabled) {
+    clearRunnerRelease();
     await suspendExistingRunner();
+    await closeOffscreen().catch((error: unknown) =>
+      log.warn('Could not close the disabled model runner.', error),
+    );
     lastStatus = { state: 'disabled', progress: 0, modelId: '', device: 'unknown' };
     return;
   }
 
   if (patch.enabled === true) {
     lastStatus = { state: 'idle', progress: 0, modelId: '', device: 'unknown' };
+    await handleWarmup();
     return;
   }
 
@@ -290,21 +336,76 @@ async function syncRunnerAfterSettings(
     // document here could destroy a newly accepted first-run download.
     await suspendExistingRunner();
     lastStatus = { state: 'idle', progress: 0, modelId: '', device: 'unknown' };
+    await handleWarmup();
   }
 }
 
-async function suspendExistingRunner(): Promise<void> {
+async function suspendExistingRunner(idleBefore?: number): Promise<boolean> {
   const exists = await offscreenExists().catch(() => false);
-  if (!exists) return;
+  if (!exists) return true;
   try {
-    const response = await sendToOffscreen<{ ok: boolean }>({
+    const response = await sendToOffscreen<{
+      ok: boolean;
+      suspended?: boolean;
+      error?: string;
+    }>({
       type: 'suspend',
       target: 'offscreen',
+      idleBefore,
     });
-    if (!response.ok) throw new Error('The model runner did not accept suspension.');
+    if (!response.ok) {
+      throw new Error(response.error ?? 'The model runner did not accept suspension.');
+    }
+    return response.suspended !== false;
   } catch (error) {
     log.warn('Could not suspend the model runner.', error);
+    return false;
   }
+}
+
+async function releaseIdleRunner(): Promise<void> {
+  const generation = runnerActivityGeneration;
+  const idleBefore = Date.now() - RUNNER_IDLE_MINUTES * 60 * 1000;
+  if (!(await suspendExistingRunner(idleBefore))) return;
+  // A check/focus arriving while suspension was queued owns the runner now. It
+  // will reload from cache if needed, so never close its offscreen document.
+  if (generation !== runnerActivityGeneration) return;
+  await closeOffscreen();
+  if (generation === runnerActivityGeneration) {
+    lastStatus = { state: 'idle', progress: 0, modelId: '', device: 'unknown' };
+  }
+}
+
+function scheduleStartupWarmup(attempt: number, delayInMinutes: number): void {
+  void chrome.alarms.create(startupWarmupAlarm(attempt), { delayInMinutes });
+}
+
+async function resetStartupWarmup(): Promise<void> {
+  const alarms = await chrome.alarms.getAll();
+  await Promise.all(
+    alarms
+      .filter((alarm) => alarm.name.startsWith(STARTUP_WARMUP_ALARM_PREFIX))
+      .map((alarm) => chrome.alarms.clear(alarm.name)),
+  );
+  await chrome.alarms.clear(RUNNER_IDLE_ALARM);
+  scheduleStartupWarmup(0, STARTUP_WARMUP_DELAY_MINUTES);
+}
+
+async function handleStartupWarmup(attempt: number): Promise<void> {
+  const [settings, lastUsedAt] = await Promise.all([loadSettings(), lastGrammarActivity()]);
+  if (!settings.enabled || !usedRecently(lastUsedAt)) return;
+
+  const idleState = await chrome.idle.queryState(STARTUP_IDLE_THRESHOLD_SECONDS);
+  if (idleState !== 'idle') {
+    if (attempt + 1 < MAX_STARTUP_WARMUP_ATTEMPTS) {
+      scheduleStartupWarmup(attempt + 1, STARTUP_RETRY_DELAY_MINUTES);
+    }
+    return;
+  }
+
+  // This path is strictly cache-only. It may initialize a ready Chrome AI
+  // session or cached local weights, but it can never fetch model files.
+  await handleWarmup();
 }
 
 async function handleRetry(): Promise<ModelStatus> {
@@ -312,6 +413,7 @@ async function handleRetry(): Promise<ModelStatus> {
   if (!settings.enabled) {
     return { state: 'disabled', progress: 0, modelId: '', device: 'unknown' };
   }
+  noteRunnerActivity(true);
   await ensureConfigured(settings);
   const status = await sendToOffscreen<ModelStatus>({ type: 'reload', target: 'offscreen' });
   lastStatus = status;
@@ -328,7 +430,14 @@ async function handleModelsList(): Promise<ModelInfo[]> {
   ]);
   const downloadsByModel = new Map(downloadStatuses.map((status) => [status.modelId, status]));
   const localActive = settings.backend !== 'prompt';
-  const activeModel = resolvePreset(settings.model, cachePreference !== 'wasm').id;
+  const isCached = (preset: (typeof MODEL_PRESETS)[number]): boolean =>
+    modelCacheIds(preset).some((modelId) => cacheInfo[modelId]?.cached);
+  const recommended = resolvePreset(settings.model, cachePreference !== 'wasm');
+  const cachedAutomatic =
+    settings.model === AUTO_MODEL && !isCached(recommended)
+      ? MODEL_PRESETS.find((preset) => isCached(preset))
+      : undefined;
+  const activeModel = cachedAutomatic?.id ?? recommended.id;
   return MODEL_PRESETS.map((preset) => {
     const currentCacheInfo = cacheInfo[preset.modelId];
     const legacyCacheInfo = (preset.legacyModelIds ?? []).map((modelId) => cacheInfo[modelId]);
@@ -350,6 +459,7 @@ async function handleModelsList(): Promise<ModelInfo[]> {
 
 async function cachePreferenceFor(preference: Settings['device']): Promise<Settings['device']> {
   if (preference !== 'auto') return preference;
+  noteRunnerActivity(false);
   await ensureOffscreen();
   const capability = await sendToOffscreen<{ hasWebGPU: boolean }>({
     type: 'device:detect',
@@ -375,6 +485,7 @@ async function handleModelsDownload(
     return { ok: false, error: 'Unknown local model.' };
   }
   const settings = await loadSettings();
+  noteRunnerActivity(false, DOWNLOAD_IDLE_MINUTES);
   await ensureOffscreen();
   // The offscreen document acknowledges immediately and reports progress via broadcasts.
   const response = await sendToOffscreen<{ ok: boolean; error?: string }>({
@@ -397,6 +508,7 @@ async function handleOnboardingSelect(
     return { ok: false, reset: false, error: 'Unknown local model.' };
   }
   const settings = await loadSettings();
+  noteRunnerActivity(false, DOWNLOAD_IDLE_MINUTES);
   await ensureOffscreen();
   const state = await sendToOffscreen<{
     hasMatchingRunning: boolean;
@@ -417,7 +529,6 @@ async function handleOnboardingSelect(
     state.hasObsoleteRunnerLoading ||
     state.clearedObsoleteStatus ||
     (cached && (state.hasMatchingRunning || state.hasMatchingRunnerLoading));
-  if (reset) await closeOffscreen();
   return { ok: true, reset };
 }
 
@@ -427,6 +538,7 @@ async function handleModelsDelete(
   if (!MODEL_PRESETS.some((preset) => preset.modelId === modelId)) {
     return { ok: false, deleted: 0, error: 'Unknown local model.' };
   }
+  noteRunnerActivity(false);
   await ensureOffscreen();
   return sendToOffscreen<{ ok: boolean; deleted: number; error?: string }>({
     type: 'download:delete',
@@ -686,6 +798,28 @@ chrome.runtime.onInstalled.addListener((details) => {
   void handleFirstRunInstall(details).catch((error: unknown) =>
     log.error('Could not open first-run Settings.', error),
   );
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  void resetStartupWarmup().catch((error: unknown) =>
+    log.warn('Could not schedule adaptive startup warmup.', error),
+  );
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === RUNNER_IDLE_ALARM) {
+    void releaseIdleRunner().catch((error: unknown) =>
+      log.warn('Could not release the idle model runner.', error),
+    );
+    return;
+  }
+
+  const attempt = startupWarmupAttempt(alarm.name);
+  if (attempt !== null) {
+    void handleStartupWarmup(attempt).catch((error: unknown) =>
+      log.warn('Adaptive startup warmup failed.', error),
+    );
+  }
 });
 
 /** Sends a message to a page's content script, ignoring "no receiver" errors. */

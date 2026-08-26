@@ -43,6 +43,182 @@ describe('assembleCorrections', () => {
     expect(assembleCorrections(text, sentences, [expanded])).toEqual([]);
   });
 
+  it('rejects a conversational answer to a question', () => {
+    const text = 'How are you doing?';
+    const sentences = segmentSentences(text);
+    const answer = 'I am doing well, thank you for asking.';
+
+    expect(assembleCorrections(text, sentences, [answer])).toEqual([]);
+  });
+
+  it('rejects answers after a partial grammar correction', () => {
+    const text = 'How are doing?';
+    const sentences = segmentSentences(text);
+
+    expect(
+      assembleCorrections(text, sentences, ['I am doing well, thank you for asking.']),
+    ).toEqual([]);
+  });
+
+  it('rejects answers to question-like text even when the question mark is missing', () => {
+    const text = 'How are you doing';
+    const sentences = segmentSentences(text);
+
+    expect(assembleCorrections(text, sentences, ['I am doing well, thanks.'])).toEqual([]);
+  });
+
+  it('rejects answers to Japanese questions written with a question particle', () => {
+    const text = '元気ですか';
+    const sentences = segmentSentences(text, 'ja');
+
+    expect(assembleCorrections(text, sentences, ['はい、元気です。'], { locale: 'ja' })).toEqual(
+      [],
+    );
+  });
+
+  it('preserves question intent while allowing grammar fixes', () => {
+    const text = 'How is you doing?';
+    const sentences = segmentSentences(text);
+    const corrections = assembleCorrections(text, sentences, ['How are you doing?']);
+
+    expect(applyCorrections(text, corrections)).toBe('How are you doing?');
+  });
+
+  it('rejects turning a question into a period-ended statement', () => {
+    const examples = [
+      ['How is you doing?', 'How are you doing.'],
+      ['How is you doing', 'How are you doing.'],
+    ] as const;
+
+    for (const [text, candidate] of examples) {
+      expect(assembleCorrections(text, segmentSentences(text), [candidate])).toEqual([]);
+    }
+  });
+
+  it('allows corrected auxiliary agreement in a question', () => {
+    const text = 'Is you ready?';
+    const sentences = segmentSentences(text);
+    const corrections = assembleCorrections(text, sentences, ['Are you ready?']);
+
+    expect(applyCorrections(text, corrections)).toBe('Are you ready?');
+  });
+
+  it('allows tense correction within the do auxiliary family', () => {
+    const text = 'Do you went home?';
+    const sentences = segmentSentences(text);
+    const corrections = assembleCorrections(text, sentences, ['Did you go home?']);
+
+    expect(applyCorrections(text, corrections)).toBe('Did you go home?');
+  });
+
+  it('does not mistake an auxiliary-looking noun for an unpunctuated question', () => {
+    const text = 'Can opener is dull.';
+    const sentences = segmentSentences(text);
+    const corrections = assembleCorrections(text, sentences, ['A can opener is dull.']);
+
+    expect(applyCorrections(text, corrections)).toBe('A can opener is dull.');
+  });
+
+  it('allows joining an auxiliary-looking compound noun', () => {
+    const text = 'Will power is useful.';
+    const sentences = segmentSentences(text);
+    const corrections = assembleCorrections(text, sentences, ['Willpower is useful.']);
+
+    expect(applyCorrections(text, corrections)).toBe('Willpower is useful.');
+  });
+
+  it('honors period-ended declaratives with auxiliary-looking subjects', () => {
+    const examples = [
+      ['May 2024 were busy.', 'May 2024 was busy.'],
+      ['Will Smith are here.', 'Will Smith is here.'],
+    ] as const;
+
+    for (const [text, candidate] of examples) {
+      const corrections = assembleCorrections(text, segmentSentences(text), [candidate]);
+      expect(applyCorrections(text, corrections)).toBe(candidate);
+    }
+  });
+
+  it('rejects answers to unpunctuated questions with noun subjects', () => {
+    const examples = [
+      ['Can dogs eat bread', 'Yes, dogs can eat bread.'],
+      ['Will the report arrive today', 'Yes, the report will arrive today.'],
+    ] as const;
+
+    for (const [text, candidate] of examples) {
+      expect(assembleCorrections(text, segmentSentences(text), [candidate])).toEqual([]);
+    }
+  });
+
+  it('recognizes contracted auxiliaries in unpunctuated questions', () => {
+    const text = "Isn't this ready";
+    const corrections = assembleCorrections(text, segmentSentences(text), ["Isn't this ready?"]);
+
+    expect(applyCorrections(text, corrections)).toBe("Isn't this ready?");
+  });
+
+  it('rejects answers to unpunctuated contracted questions', () => {
+    const examples = [
+      ["Shouldn't we leave", "We shouldn't leave."],
+      ["Won't dogs eat bread", "No, dogs won't eat bread."],
+      ['Isn’t this ready', 'No, it isn’t ready.'],
+    ] as const;
+
+    for (const [text, candidate] of examples) {
+      expect(assembleCorrections(text, segmentSentences(text), [candidate])).toEqual([]);
+    }
+  });
+
+  it('preserves negation in contracted questions', () => {
+    const text = "Won't dogs eat bread";
+
+    expect(assembleCorrections(text, segmentSentences(text), ['Will dogs eat bread?'])).toEqual([]);
+    const expanded = assembleCorrections(text, segmentSentences(text), [
+      'Will dogs not eat bread?',
+    ]);
+    expect(applyCorrections(text, expanded)).toBe('Will dogs not eat bread?');
+  });
+
+  it('rejects modal paraphrases that change a question rather than correct it', () => {
+    const text = 'Can you send the report?';
+    const sentences = segmentSentences(text);
+
+    expect(assembleCorrections(text, sentences, ['Could you send the report?'])).toEqual([]);
+  });
+
+  it('rejects newly introduced first-person contractions', () => {
+    for (const candidate of [
+      "I'm ready to help.",
+      'I’m ready to help.',
+      "I've been ready to help.",
+    ]) {
+      const text = 'Ready to help.';
+      expect(assembleCorrections(text, segmentSentences(text), [candidate])).toEqual([]);
+    }
+  });
+
+  it('allows apostrophe-only repairs to existing first-person contractions', () => {
+    const examples = [
+      ['Ive been ready.', "I've been ready."],
+      ['Ill help.', "I'll help."],
+      ['Weve started already.', "We've started already."],
+    ] as const;
+
+    for (const [text, candidate] of examples) {
+      const corrections = assembleCorrections(text, segmentSentences(text), [candidate]);
+      expect(applyCorrections(text, corrections)).toBe(candidate);
+    }
+  });
+
+  it('rejects low-similarity paraphrases even when they retain one source word', () => {
+    const text = 'Can you send the report?';
+    const sentences = segmentSentences(text);
+
+    expect(assembleCorrections(text, sentences, ['Sure, you will receive it shortly?'])).toEqual(
+      [],
+    );
+  });
+
   it('keeps a small insertion needed for a grammar fix', () => {
     const text = 'I a student.';
     const sentences = segmentSentences(text);

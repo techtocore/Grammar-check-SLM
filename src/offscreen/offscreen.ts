@@ -62,7 +62,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'warmup': {
       // Fire-and-forget: start loading and report progress via status broadcasts.
       const runner = getCorrector();
-      void runner.warmup().catch((error: unknown) => log.error('Warmup failed.', error));
+      void runner
+        .warmup({ cacheOnly: message.cacheOnly })
+        .catch((error: unknown) => log.error('Warmup failed.', error));
       const status = runner.getStatus();
       sendResponse(
         status.state === 'idle' ? queuedLoadingStatus(status, 'Model load queued.') : status,
@@ -77,9 +79,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     case 'suspend': {
       void getCorrector()
-        .suspend()
-        .catch((error: unknown) => log.error('Model suspension failed.', error));
-      sendResponse({ ok: true });
+        .suspend(message.idleBefore)
+        .then((suspended) => sendResponse({ ok: true, suspended }))
+        .catch((error: unknown) => {
+          log.error('Model suspension failed.', error);
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
       return true;
     }
     case 'device:detect': {

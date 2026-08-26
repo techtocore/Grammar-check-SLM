@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Semantic added/removed text in the built-in editor diff, including visible
   delete-only corrections.
+- Adaptive cached-model warmup after browser restart and on editing intent,
+  gated by recent use and browser idle state.
 - A model update indicator and one-click migration for superseded local-model
   caches, without disrupting offline use.
 - Regression coverage for ratio- and byte-based download progress, editor diff
@@ -20,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Automatic model selection now prefers a compatible completed cache, avoiding
+  a new download when an already-ready model can provide corrections.
+- Speculative startup/focus warmups are strictly offline, and inactive model
+  sessions release their GPU/WASM memory after five minutes without grammar
+  activity.
 - Moved Qwen3.5 0.8B to its upstream-recommended optimized ONNX export while
   preserving the existing model preset, settings, and offline legacy caches
   until the replacement is downloaded.
@@ -30,6 +37,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Automatic model labels/onboarding now use real WebGPU capability and the
+  cached-first selection policy, avoiding an unnecessary WebGPU-only download
+  on WASM devices.
+- Changing the onboarding model safely aborts superseded loads/downloads
+  instead of hard-closing the runner and interrupting unrelated queued work.
+- Onboarding cancellation is limited to speculative warmups; a model load
+  already owned by a real grammar check is never dropped.
+- Cancelling a load of already-cached weights no longer marks that model as a
+  partial download.
+- Question text is now framed as inert editing input and guarded
+  deterministically, so Chrome AI answers are discarded instead of appearing
+  as grammar suggestions.
 - Chrome AI setup progress now handles both ratio-style and standard byte
   progress events and always stays within 0–100%.
 - A failed model-cache completion marker no longer causes successfully loaded

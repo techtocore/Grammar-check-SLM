@@ -1,6 +1,6 @@
 # Privacy Policy — Grammar Check SLM
 
-**Last updated: July 22, 2026**
+**Last updated: August 25, 2026**
 
 Grammar Check SLM ("the extension") is a privacy-first browser extension that
 checks and corrects grammar, spelling, and punctuation **entirely on your own
@@ -52,7 +52,10 @@ draft. The draft:
 Your preferences (enabled state, chosen engine/model, typing delay, per-site
 allow/deny lists, and field toggles) are stored **locally** on your device using
 `chrome.storage.local`. They are not transmitted anywhere and are not synced to
-any account.
+any account. The extension also stores one local timestamp, updated at most once
+per hour, indicating when grammar checking was last used. It contains no page,
+text, or site information and is used only to decide whether a cached model
+should be prepared during a future browser-idle window.
 
 ### Downloaded model files
 
@@ -80,6 +83,12 @@ read-only text. It never reads your clipboard.
 
 - **`storage` / `unlimitedStorage`** — save your settings and cache downloaded
   model files locally (models can be several hundred megabytes).
+- **`alarms`** — reliably release an inactive model runner and schedule a
+  cache-only readiness check after browser restart.
+- **`idle`** — delay optional startup preparation until Chrome reports that the
+  browser is idle, avoiding competition with active browsing. The extension
+  receives only the current `active`, `idle`, or `locked` state and stores no
+  idle history.
 - **`offscreen`** — run the local language model in a hidden document, which is
   required to use WebGPU/WASM from a Manifest V3 extension.
 - **`contextMenus`** — provide the right-click "Correct grammar of…" action and

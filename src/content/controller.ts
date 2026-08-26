@@ -7,6 +7,7 @@ import { extensionContextValid, invalidateContext, isContextInvalidationError } 
 import type { Tooltip } from './tooltip';
 import { fieldKindFor } from './fields/eligibility';
 import { countWords } from '../core/tokenize';
+import { requestCachedWarmup } from './warmup';
 
 const log = createLogger('content');
 
@@ -51,6 +52,7 @@ export class FieldController {
   /** Called on every edit: drop now-stale highlights/tooltip, then debounce a check. */
   private onEdited(): void {
     this.requestSeq++; // invalidate any in-flight response
+    requestCachedWarmup();
     this.tooltip.hide();
     if (this.corrections.length > 0) this.setCorrections([]);
     this.scheduleCheck();

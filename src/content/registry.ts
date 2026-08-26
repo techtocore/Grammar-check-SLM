@@ -4,8 +4,7 @@ import { FieldController } from './controller';
 import type { Tooltip } from './tooltip';
 import { fieldKindFor } from './fields/eligibility';
 import type { Settings } from '../shared/settings';
-import { sendToBackground } from '../shared/messages';
-import { invalidateContext, isContextInvalidationError } from './lifecycle';
+import { requestCachedWarmup } from './warmup';
 
 /** The genuinely focused element, descending through open shadow roots. */
 function deepActiveElement(root: DocumentOrShadowRoot = document): Element | null {
@@ -22,7 +21,6 @@ export class FieldRegistry {
   private readonly controllers = new Map<HTMLElement, FieldController>();
   private observer: MutationObserver | null = null;
   private started = false;
-  private warmedUp = false;
 
   constructor(
     private settings: Settings,
@@ -171,14 +169,6 @@ export class FieldRegistry {
       new FieldController(adapter, this.settings, this.tooltip, this.origin),
     );
     this.syncObserver();
-    this.warmup();
-  }
-
-  private warmup(): void {
-    if (this.warmedUp) return;
-    this.warmedUp = true;
-    void sendToBackground({ type: 'warmup', target: 'background' }).catch((error: unknown) => {
-      if (isContextInvalidationError(error)) invalidateContext();
-    });
+    requestCachedWarmup();
   }
 }

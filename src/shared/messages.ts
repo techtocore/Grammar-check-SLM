@@ -28,6 +28,13 @@ export interface RunnerConfig {
   language: string;
 }
 
+export interface LoadPolicy {
+  /** Refuse every remote fetch; speculative warmup must never consume bandwidth. */
+  cacheOnly?: boolean;
+  /** Cancels an in-progress model/session load when its target is superseded. */
+  signal?: AbortSignal;
+}
+
 export interface CorrectionBatch {
   corrections: Correction[];
   /** Character offset where the next bounded pass should begin. */
@@ -139,9 +146,9 @@ export type BackgroundMessage =
 
 export type OffscreenMessage =
   | { type: 'status'; target: 'offscreen' }
-  | { type: 'warmup'; target: 'offscreen' }
+  | { type: 'warmup'; target: 'offscreen'; cacheOnly?: boolean }
   | { type: 'reload'; target: 'offscreen' }
-  | { type: 'suspend'; target: 'offscreen' }
+  | { type: 'suspend'; target: 'offscreen'; idleBefore?: number }
   | { type: 'device:detect'; target: 'offscreen' }
   | { type: 'downloads:status'; target: 'offscreen' }
   | {
@@ -343,12 +350,19 @@ export function isOffscreenMessage(msg: unknown): msg is OffscreenMessage {
   if (!isRecord(msg) || msg.target !== 'offscreen' || typeof msg.type !== 'string') return false;
   switch (msg.type) {
     case 'status':
-    case 'warmup':
     case 'reload':
-    case 'suspend':
     case 'device:detect':
     case 'downloads:status':
       return true;
+    case 'warmup':
+      return msg.cacheOnly === undefined || typeof msg.cacheOnly === 'boolean';
+    case 'suspend':
+      return (
+        msg.idleBefore === undefined ||
+        (typeof msg.idleBefore === 'number' &&
+          Number.isFinite(msg.idleBefore) &&
+          msg.idleBefore >= 0)
+      );
     case 'check':
       return hasText(msg.requestId) && typeof msg.text === 'string' && isOffset(msg.startOffset);
     case 'config':

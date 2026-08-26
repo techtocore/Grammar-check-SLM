@@ -1,21 +1,28 @@
 import { pipeline, env } from '@huggingface/transformers';
 
-import { buildMessages, buildT5Prompt, buildInitialPrompts } from '../core/prompt';
 import {
+  buildCorrectionRequest,
+  buildMessages,
+  buildT5Prompt,
+  buildInitialPrompts,
+} from '../core/prompt';
+import {
+  AUTO_MODEL,
   getPreset,
+  modelCacheIds,
   resolvePreset,
   MODEL_PRESETS,
   type DType,
   type DTypeConfig,
   type ModelPreset,
 } from '../shared/models';
-import type { ModelStatus, RunnerConfig } from '../shared/messages';
+import type { LoadPolicy, ModelStatus, RunnerConfig } from '../shared/messages';
 import { createLogger } from '../shared/logger';
 import { promptApiLanguageOptions } from '../shared/prompt-language';
 import { progressPercentage } from '../shared/progress';
 import {
   deleteModelCache,
-  getCompletedModelDevices,
+  listCompletedModelDevices,
   markModelDownloadComplete,
   markModelDownloadStarted,
 } from '../shared/model-cache';
@@ -80,7 +87,7 @@ export type ProgressFn = (progress: number, modelId: string, device: Device) => 
 
 /** A pluggable inference backend used by the Corrector. */
 export interface Backend {
-  load(config: RunnerConfig, onProgress: ProgressFn): Promise<LoadedBackend>;
+  load(config: RunnerConfig, onProgress: ProgressFn, policy?: LoadPolicy): Promise<LoadedBackend>;
   /** Returns the raw model output for one sentence (cleanup happens in the Corrector). */
   generate(sentence: string): Promise<string>;
   dispose(): Promise<void>;
@@ -139,52 +146,75 @@ function deviceCandidates(pref: RunnerConfig['device'], hasWebGPU: boolean): ('w
   return hasWebGPU ? ['webgpu', 'wasm'] : ['wasm'];
 }
 
-async function orderedDeviceCandidates(
+function orderedDeviceCandidates(
   pref: RunnerConfig['device'],
   hasWebGPU: boolean,
   preset: ModelPreset,
-): Promise<('webgpu' | 'wasm')[]> {
+  completed: ReadonlySet<'webgpu' | 'wasm'>,
+): ('webgpu' | 'wasm')[] {
   const candidates = deviceCandidates(pref, hasWebGPU).filter(
     (device) => !preset.requiresWebGPU || device === 'webgpu',
   );
   if (pref !== 'auto') return candidates;
-  const completed = new Set(
-    await getCompletedModelDevices(preset.modelId).catch((error: unknown) => {
-      log.warn('Could not inspect cached model backends.', error);
-      return [];
-    }),
-  );
   return [
     ...candidates.filter((device) => completed.has(device)),
     ...candidates.filter((device) => !completed.has(device)),
   ];
 }
 
-async function completedDevices(modelId: string): Promise<Set<'webgpu' | 'wasm'>> {
-  return new Set(
-    await getCompletedModelDevices(modelId).catch((error: unknown) => {
-      log.warn('Could not inspect cached model backends.', error);
-      return [];
-    }),
-  );
-}
+type CompletionSnapshot = Record<string, ('webgpu' | 'wasm')[]>;
 
-async function preferCachedLegacyPreset(
+function cachedPresetVariant(
   preset: ModelPreset,
   candidates: readonly ('webgpu' | 'wasm')[],
-): Promise<ModelPreset> {
-  if (!preset.legacyModelIds?.length) return preset;
-  const current = await completedDevices(preset.modelId);
-  if (candidates.some((device) => current.has(device))) return preset;
-
-  for (const modelId of preset.legacyModelIds) {
-    const completed = await completedDevices(modelId);
+  completedByModel: CompletionSnapshot,
+): { preset: ModelPreset; completed: Set<'webgpu' | 'wasm'> } | null {
+  for (const modelId of modelCacheIds(preset)) {
+    const completed = new Set(completedByModel[modelId] ?? []);
     if (candidates.some((device) => completed.has(device))) {
-      log.info(`Using cached legacy model ${modelId} until ${preset.modelId} is downloaded.`);
-      return { ...preset, modelId, legacyModelIds: [] };
+      if (modelId !== preset.modelId) {
+        log.info(`Using cached legacy model ${modelId} until ${preset.modelId} is downloaded.`);
+      }
+      return {
+        preset: modelId === preset.modelId ? preset : { ...preset, modelId, legacyModelIds: [] },
+        completed,
+      };
     }
   }
-  return preset;
+  return null;
+}
+
+async function resolveTransformersTarget(
+  config: RunnerConfig,
+  hasWebGPU: boolean,
+): Promise<{ preset: ModelPreset; completed: Set<'webgpu' | 'wasm'> }> {
+  const resolved = resolvePreset(config.model, hasWebGPU && config.device !== 'wasm');
+  const catalogue =
+    config.model === AUTO_MODEL
+      ? [resolved, ...MODEL_PRESETS.filter((preset) => preset.id !== resolved.id)]
+      : [resolved];
+  const cacheIds = catalogue.flatMap((preset) => modelCacheIds(preset));
+  const completedByModel = await listCompletedModelDevices(cacheIds).catch((error: unknown) => {
+    log.warn('Could not inspect cached model backends.', error);
+    const emptySnapshot: CompletionSnapshot = Object.fromEntries(
+      cacheIds.map((modelId) => [modelId, []]),
+    );
+    return emptySnapshot;
+  });
+
+  for (const preset of catalogue) {
+    const candidates = deviceCandidates(config.device, hasWebGPU).filter(
+      (device) => !preset.requiresWebGPU || device === 'webgpu',
+    );
+    const cached = cachedPresetVariant(preset, candidates, completedByModel);
+    if (cached) {
+      if (preset.id !== resolved.id) {
+        log.info(`Using already-cached ${preset.label} for automatic model selection.`);
+      }
+      return cached;
+    }
+  }
+  return { preset: resolved, completed: new Set() };
 }
 
 async function recordCompletedModel(preset: ModelPreset, device: 'webgpu' | 'wasm'): Promise<void> {
@@ -308,6 +338,7 @@ async function buildPipeline(
   device: 'webgpu' | 'wasm',
   dtype: DTypeConfig,
   onRaw: (raw: RawProgress) => void,
+  policy: LoadPolicy = {},
 ): Promise<TextGenerator> {
   if (device === 'webgpu' && onnxWebGPU) {
     onnxWebGPU.powerPreference = undefined;
@@ -315,41 +346,70 @@ async function buildPipeline(
   }
   const progress_callback = (raw: unknown): void => onRaw(raw as RawProgress);
   log.info(`Loading ${preset.modelId} on ${device} (${dtypeLabel(dtype)}).`);
-  return createPipeline(preset.task, preset.modelId, { device, dtype, progress_callback });
+  const previousAllowLocalModels = env.allowLocalModels;
+  const previousFetch = env.fetch;
+  if (policy.cacheOnly) env.allowLocalModels = true;
+  if (policy.signal) {
+    const signal = policy.signal;
+    env.fetch = (input, init) => previousFetch(input, { ...init, signal });
+  }
+  try {
+    return await createPipeline(preset.task, preset.modelId, {
+      device,
+      dtype,
+      progress_callback,
+      local_files_only: policy.cacheOnly === true,
+    });
+  } finally {
+    env.allowLocalModels = previousAllowLocalModels;
+    env.fetch = previousFetch;
+  }
 }
 
 export class TransformersBackend implements Backend {
   private generator: TextGenerator | null = null;
   private preset: ModelPreset | null = null;
 
-  async load(config: RunnerConfig, onProgress: ProgressFn): Promise<LoadedBackend> {
+  async load(
+    config: RunnerConfig,
+    onProgress: ProgressFn,
+    policy: LoadPolicy = {},
+  ): Promise<LoadedBackend> {
     const hasWebGPU = await detectWebGPU();
     if (config.device === 'webgpu' && !hasWebGPU) {
       throw new Error('WebGPU is not available on this device.');
     }
-    const resolvedPreset = resolvePreset(config.model, hasWebGPU && config.device !== 'wasm');
-    const supportedDevices = deviceCandidates(config.device, hasWebGPU).filter(
-      (device) => !resolvedPreset.requiresWebGPU || device === 'webgpu',
-    );
-    const preset = await preferCachedLegacyPreset(resolvedPreset, supportedDevices);
-    const devices = await orderedDeviceCandidates(config.device, hasWebGPU, preset);
-    await markModelDownloadStarted(preset.modelId, config.device);
+    const { preset, completed } = await resolveTransformersTarget(config, hasWebGPU);
+    let devices = orderedDeviceCandidates(config.device, hasWebGPU, preset, completed);
+    if (policy.cacheOnly) devices = devices.filter((device) => completed.has(device));
+    if (devices.length === 0) {
+      throw new BackendNotReadyError('No compatible local model is fully cached.');
+    }
     const expectedBytes = preset.approxDownloadMB * 1024 * 1024;
     let lastError: unknown = new Error('No backend available');
 
     for (const device of devices) {
+      if (!policy.cacheOnly && !completed.has(device)) {
+        await markModelDownloadStarted(preset.modelId, device);
+      }
       const dtypes = dtypeCandidates(preset, device);
       for (const [index, dtype] of dtypes.entries()) {
         const aggregator = new ProgressAggregator(expectedBytes);
         try {
-          const generator = await buildPipeline(preset, device, dtype, (raw) => {
-            if (raw.status === 'progress' || raw.status === 'done') {
-              onProgress(aggregator.update(raw), preset.modelId, device);
-            }
-          });
+          const generator = await buildPipeline(
+            preset,
+            device,
+            dtype,
+            (raw) => {
+              if (raw.status === 'progress' || raw.status === 'done') {
+                onProgress(aggregator.update(raw), preset.modelId, device);
+              }
+            },
+            policy,
+          );
           this.generator = generator;
           this.preset = preset;
-          await recordCompletedModel(preset, device);
+          if (!policy.cacheOnly) await recordCompletedModel(preset, device);
           return { label: preset.label, modelId: preset.modelId, device };
         } catch (error) {
           lastError = error;
@@ -357,6 +417,9 @@ export class TransformersBackend implements Backend {
           if (isMemoryError(error) && !hasSmallerCandidate(dtypes, index)) break;
         }
       }
+    }
+    if (policy.cacheOnly) {
+      throw new BackendNotReadyError('The cached local model is incomplete.');
     }
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
@@ -404,6 +467,7 @@ export async function downloadTransformersModel(
   preset: ModelPreset,
   onProgress: (progress: number) => void,
   devicePreference: RunnerConfig['device'] = 'auto',
+  signal?: AbortSignal,
 ): Promise<void> {
   const hasWebGPU = await detectWebGPU();
   if (devicePreference === 'webgpu' && !hasWebGPU) {
@@ -412,7 +476,15 @@ export async function downloadTransformersModel(
   if (preset.requiresWebGPU && (devicePreference === 'wasm' || !hasWebGPU)) {
     throw new Error(`${preset.label} requires WebGPU.`);
   }
-  const devices = await orderedDeviceCandidates(devicePreference, hasWebGPU, preset);
+  const completedByModel = await listCompletedModelDevices([preset.modelId]).catch(() => ({
+    [preset.modelId]: [],
+  }));
+  const devices = orderedDeviceCandidates(
+    devicePreference,
+    hasWebGPU,
+    preset,
+    new Set(completedByModel[preset.modelId] ?? []),
+  );
   await markModelDownloadStarted(preset.modelId, devicePreference);
   const expectedBytes = preset.approxDownloadMB * 1024 * 1024;
   let lastError: unknown = new Error('No backend available');
@@ -421,10 +493,16 @@ export async function downloadTransformersModel(
     for (const [index, dtype] of dtypes.entries()) {
       const aggregator = new ProgressAggregator(expectedBytes);
       try {
-        const generator = await buildPipeline(preset, device, dtype, (raw) => {
-          if (raw.status === 'progress' || raw.status === 'done')
-            onProgress(aggregator.update(raw));
-        });
+        const generator = await buildPipeline(
+          preset,
+          device,
+          dtype,
+          (raw) => {
+            if (raw.status === 'progress' || raw.status === 'done')
+              onProgress(aggregator.update(raw));
+          },
+          { cacheOnly: false, signal },
+        );
         await generator.dispose?.();
         await recordCompletedModel(preset, device);
         return;
@@ -450,7 +528,11 @@ export class PromptApiBackend implements Backend {
     return typeof globalThis.LanguageModel !== 'undefined';
   }
 
-  async load(config: RunnerConfig, onProgress: ProgressFn): Promise<LoadedBackend> {
+  async load(
+    config: RunnerConfig,
+    onProgress: ProgressFn,
+    policy: LoadPolicy = {},
+  ): Promise<LoadedBackend> {
     const lm = globalThis.LanguageModel;
     if (!lm) throw new Error('Chrome built-in AI (Prompt API) is not available in this browser.');
 
@@ -458,7 +540,7 @@ export class PromptApiBackend implements Backend {
     // missing output language logs a warning and can lower quality).
     const languageOptions = promptApiLanguageOptions(config.language);
     const availability = await lm.availability(languageOptions);
-    if (availability !== 'available' && config.backend === 'auto') {
+    if (availability !== 'available' && (config.backend === 'auto' || policy.cacheOnly === true)) {
       throw new BackendNotReadyError('Chrome built-in AI is not ready; using the local model.');
     }
     if (availability === 'unavailable') {
@@ -474,6 +556,7 @@ export class PromptApiBackend implements Backend {
     onProgress(availability === 'available' ? 100 : 1, 'Chrome built-in AI', 'built-in');
     this.session = await lm.create({
       ...this.createOptions,
+      ...(policy.signal ? { signal: policy.signal } : {}),
       monitor(monitor) {
         monitor.addEventListener('downloadprogress', (event) => {
           const progress = Math.min(99, progressPercentage(event as ProgressEvent));
@@ -504,7 +587,7 @@ export class PromptApiBackend implements Backend {
     }
 
     try {
-      return await session.prompt(sentence);
+      return await session.prompt(buildCorrectionRequest(sentence));
     } finally {
       session.destroy();
     }

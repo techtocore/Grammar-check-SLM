@@ -7,6 +7,8 @@
   "minimum_chrome_version": "116",
   "permissions": [
     "storage",
+    "alarms",
+    "idle",
     "unlimitedStorage",
     "offscreen",
     "scripting",

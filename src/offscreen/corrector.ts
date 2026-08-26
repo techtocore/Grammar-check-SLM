@@ -5,6 +5,7 @@ import { LRUCache } from '../core/cache';
 import type { Sentence } from '../core/types';
 import type {
   CorrectionBatch,
+  LoadPolicy,
   ModelDownloadStatus,
   ModelStatus,
   RunnerConfig,
@@ -33,6 +34,13 @@ const LOAD_RETRY_COOLDOWN_MS = 15000;
 interface DownloadOperation {
   modelId: string;
   purpose?: 'onboarding';
+  controller: AbortController;
+  promise: Promise<void>;
+}
+
+interface LoadOperation {
+  abortable: boolean;
+  cacheOnly: boolean;
   promise: Promise<void>;
 }
 
@@ -78,11 +86,13 @@ function classifyError(error: unknown): string {
  */
 export class Corrector {
   private backend: Backend | null = null;
-  private loadPromise: Promise<void> | null = null;
+  private loadPromise: LoadOperation | null = null;
+  private loadController: AbortController | null = null;
   private config: RunnerConfig | null = null;
   private loadGeneration = 0;
   private loadFailedAt = 0;
   private cacheGeneration = 0;
+  private lastActivityAt = 0;
   private readonly cache = new LRUCache<string, string>(1000);
   private readonly downloadStatuses = new Map<string, ModelDownloadStatus>();
   private readonly downloadStatusOwners = new Map<string, string>();
@@ -145,6 +155,14 @@ export class Corrector {
       this.runningDownloadKeys.has(key),
     );
     const runnerLoading = this.runnerLoadingRelation(preset.modelId, device);
+    for (const [key, operation] of runningDownloads) {
+      if (key !== matchingKey && operation.purpose === 'onboarding') {
+        operation.controller.abort();
+      }
+    }
+    if (runnerLoading === 'obsolete' && this.loadPromise?.abortable) {
+      this.loadController?.abort();
+    }
     return {
       hasMatchingRunning: this.runningDownloadKeys.has(matchingKey),
       hasObsoleteRunning: runningDownloads.some(([key]) => key !== matchingKey),
@@ -208,31 +226,67 @@ export class Corrector {
     }
   }
 
-  async ensureLoaded(): Promise<void> {
+  async ensureLoaded(policy: LoadPolicy = {}, abortable = false): Promise<void> {
     if (this.backend) return;
-    if (this.loadFailedAt > 0 && Date.now() - this.loadFailedAt < LOAD_RETRY_COOLDOWN_MS) {
+    if (
+      !policy.cacheOnly &&
+      this.loadFailedAt > 0 &&
+      Date.now() - this.loadFailedAt < LOAD_RETRY_COOLDOWN_MS
+    ) {
       throw new Error(this.status.message ?? 'Model failed to load');
     }
-    if (!this.loadPromise) this.loadPromise = this.load();
-    await this.loadPromise;
+
+    while (!this.backend) {
+      const existing = this.loadPromise;
+      if (existing) {
+        await existing.promise;
+        if (this.backend || policy.cacheOnly) return;
+        // A real check arriving behind a cache-only miss must be allowed to
+        // start the normal load/download path.
+        continue;
+      }
+
+      const operation: LoadOperation = {
+        abortable,
+        cacheOnly: policy.cacheOnly === true,
+        promise: Promise.resolve(),
+      };
+      operation.promise = this.load(policy);
+      this.loadPromise = operation;
+      try {
+        await operation.promise;
+      } finally {
+        if (!this.backend && this.loadPromise === operation) this.loadPromise = null;
+      }
+      return;
+    }
   }
 
   /** Loads the configured backend through the same queue as checks/downloads. */
-  warmup(): Promise<void> {
-    return this.runExclusive(() => this.ensureLoaded());
+  warmup(policy: LoadPolicy = {}): Promise<void> {
+    this.lastActivityAt = Date.now();
+    return this.runExclusive(() => this.ensureLoaded(policy, true));
   }
 
   /** Releases model memory after queued inference/download work has completed. */
-  suspend(): Promise<void> {
-    this.cacheGeneration++;
-    this.cache.clear();
-    return this.runExclusive(async () => {
+  suspend(idleBefore?: number): Promise<boolean> {
+    if (idleBefore === undefined) {
+      this.cacheGeneration++;
       this.cache.clear();
+    }
+    return this.runExclusive(async () => {
+      if (idleBefore !== undefined && this.lastActivityAt > idleBefore) return false;
+      if (idleBefore !== undefined) {
+        this.cacheGeneration++;
+        this.cache.clear();
+      }
       await this.dispose();
+      return true;
     });
   }
 
   async correct(text: string, startOffset = 0): Promise<CorrectionBatch> {
+    this.lastActivityAt = Date.now();
     const requestedCacheGeneration = this.cacheGeneration;
     return this.runExclusive(async () => {
       if (requestedCacheGeneration !== this.cacheGeneration) {
@@ -323,6 +377,7 @@ export class Corrector {
       state: 'downloading',
       progress: 0,
     });
+    const controller = new AbortController();
     const operation = this.runExclusive(async () => {
       this.runningDownloadKeys.add(operationKey);
       try {
@@ -357,6 +412,7 @@ export class Corrector {
               }
             },
             devicePreference,
+            controller.signal,
           );
           if (
             !this.isOnboardingOperation(operationKey, purpose) ||
@@ -370,6 +426,13 @@ export class Corrector {
             this.clearDownloadStatus(operationKey, preset.modelId, true);
           }
         } catch (error) {
+          const superseded =
+            this.isOnboardingOperation(operationKey, purpose) &&
+            !this.isCurrentOnboardingTarget(preset.modelId, devicePreference);
+          if (superseded) {
+            this.clearDownloadStatus(operationKey, preset.modelId, true);
+            return;
+          }
           if (
             !this.isOnboardingOperation(operationKey, purpose) ||
             this.isCurrentOnboardingTarget(preset.modelId, devicePreference)
@@ -380,8 +443,6 @@ export class Corrector {
               progress: 0,
               error: classifyError(error),
             });
-          } else {
-            this.clearDownloadStatus(operationKey, preset.modelId, true);
           }
           throw error;
         }
@@ -389,7 +450,12 @@ export class Corrector {
         this.runningDownloadKeys.delete(operationKey);
       }
     });
-    const entry: DownloadOperation = { modelId: preset.modelId, purpose, promise: operation };
+    const entry: DownloadOperation = {
+      modelId: preset.modelId,
+      purpose,
+      controller,
+      promise: operation,
+    };
     this.downloadOperations.set(operationKey, entry);
     void operation.then(
       () => {
@@ -479,64 +545,106 @@ export class Corrector {
     this.onStatus(this.status);
   }
 
-  private async load(): Promise<void> {
+  private async load(policy: LoadPolicy): Promise<void> {
     const config = this.config;
     if (!config) throw new Error('Runner is not configured');
 
     // Claim ownership of the status: this load now supersedes any earlier
     // teardown/load, so their late updates are ignored (see dispose()).
     const generation = ++this.loadGeneration;
+    const controller = new AbortController();
+    this.loadController = controller;
     let lastError: unknown = new Error('No backend available');
+    let unexpectedError: unknown;
 
-    for (const makeBackend of this.backendPicker(config)) {
-      if (generation !== this.loadGeneration) return; // superseded before we started
-      const backend = makeBackend();
-      this.setStatus({
-        state: 'loading',
-        progress: 0,
-        modelId: '',
-        device: 'unknown',
-        error: undefined,
-        message: undefined,
-      });
-      try {
-        const info = await backend.load(config, (progress, modelId, device) => {
-          if (generation === this.loadGeneration) {
-            this.setStatus({
-              state: 'loading',
-              progress,
-              modelId,
-              device,
-              error: undefined,
-              message: undefined,
-            });
-          }
-        });
-        if (generation !== this.loadGeneration) {
-          await backend.dispose();
-          return; // superseded by a config change
-        }
-        this.backend = backend;
-        this.loadFailedAt = 0;
+    try {
+      for (const makeBackend of this.backendPicker(config)) {
+        if (generation !== this.loadGeneration) return; // superseded before we started
+        const backend = makeBackend();
         this.setStatus({
-          state: 'ready',
-          progress: 100,
-          modelId: info.modelId,
-          device: info.device,
+          state: 'loading',
+          progress: 0,
+          modelId: '',
+          device: 'unknown',
           error: undefined,
           message: undefined,
         });
-        return;
-      } catch (error) {
-        lastError = error;
-        if (error instanceof BackendNotReadyError) log.info(error.message);
-        else log.warn('Backend load failed; trying the next option.', error);
-        await backend.dispose().catch(() => undefined);
+        try {
+          const info = await backend.load(
+            config,
+            (progress, modelId, device) => {
+              if (generation === this.loadGeneration) {
+                this.setStatus({
+                  state: 'loading',
+                  progress,
+                  modelId,
+                  device,
+                  error: undefined,
+                  message: undefined,
+                });
+              }
+            },
+            { ...policy, signal: controller.signal },
+          );
+          if (generation !== this.loadGeneration) {
+            await backend.dispose();
+            return; // superseded by a config change
+          }
+          this.backend = backend;
+          this.loadFailedAt = 0;
+          this.setStatus({
+            state: 'ready',
+            progress: 100,
+            modelId: info.modelId,
+            device: info.device,
+            error: undefined,
+            message: undefined,
+          });
+          return;
+        } catch (error) {
+          lastError = error;
+          if (error instanceof BackendNotReadyError) log.info(error.message);
+          else {
+            unexpectedError = error;
+            log.warn('Backend load failed; trying the next option.', error);
+          }
+          await backend.dispose().catch(() => undefined);
+          if (controller.signal.aborted) {
+            if (generation === this.loadGeneration) {
+              this.setStatus({
+                state: 'idle',
+                progress: 0,
+                modelId: '',
+                device: 'unknown',
+                error: undefined,
+                message: undefined,
+              });
+            }
+            return;
+          }
+        }
       }
-    }
 
-    if (generation === this.loadGeneration) this.failLoad(lastError);
-    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+      if (policy.cacheOnly && unexpectedError === undefined) {
+        if (generation === this.loadGeneration) {
+          this.setStatus({
+            state: 'idle',
+            progress: 0,
+            modelId: '',
+            device: 'unknown',
+            error: undefined,
+            message: undefined,
+          });
+        }
+        return;
+      }
+
+      if (unexpectedError !== undefined) lastError = unexpectedError;
+      if (generation === this.loadGeneration) this.failLoad(lastError);
+      throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    } finally {
+      if (this.loadController === controller) this.loadController = null;
+    }
   }
 
   private failLoad(error: unknown): void {

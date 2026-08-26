@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelStatus, RunnerConfig } from '../shared/messages';
+import { applyCorrections } from '../core';
 import type { Backend, LoadedBackend } from './backends';
 import { Corrector } from './corrector';
 import { BackendNotReadyError, downloadTransformersModel } from './backends';
@@ -64,6 +65,42 @@ describe('Corrector', () => {
     expect(result.corrections).not.toEqual([]);
   });
 
+  it('never turns a Chrome AI answer into grammar suggestions', async () => {
+    const backend = fakeBackend(
+      vi.fn(() => Promise.resolve('I am doing well, thank you for asking.')),
+      'built-in',
+    );
+    const corrector = new Corrector(vi.fn(), () => [() => backend]);
+    await corrector.setConfig({ ...CONFIG, backend: 'auto' });
+
+    await expect(corrector.correct('How are you doing?')).resolves.toEqual({
+      corrections: [],
+      nextOffset: 'How are you doing?'.length,
+      complete: true,
+    });
+  });
+
+  it('handles the reported correction flow without answering the corrected question', async () => {
+    const generate = vi.fn((sentence: string) =>
+      Promise.resolve(
+        sentence === 'How is you doing?'
+          ? 'How are you doing?'
+          : 'I am doing well, thank you for asking.',
+      ),
+    );
+    const backend = fakeBackend(generate, 'built-in');
+    const corrector = new Corrector(vi.fn(), () => [() => backend]);
+    await corrector.setConfig({ ...CONFIG, backend: 'auto' });
+
+    const firstPass = await corrector.correct('How is you doing?');
+    const corrected = applyCorrections('How is you doing?', firstPass.corrections);
+    expect(corrected).toBe('How are you doing?');
+
+    const secondPass = await corrector.correct(corrected);
+    expect(secondPass.corrections).toEqual([]);
+    expect(generate).toHaveBeenCalledWith('How are you doing?');
+  });
+
   it('continues checking text after the first bounded sentence pass', async () => {
     const generate = vi.fn((sentence: string) =>
       Promise.resolve(sentence.replace(' have ', ' has ')),
@@ -103,6 +140,56 @@ describe('Corrector', () => {
     await expect(corrector.warmup()).resolves.toBeUndefined();
     expect(corrector.getStatus()).toMatchObject({ state: 'ready', device: 'wasm' });
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('keeps cache-only misses quiet and lets a real check load normally', async () => {
+    const load = vi
+      .fn<Backend['load']>()
+      .mockRejectedValueOnce(new BackendNotReadyError('No cached model'))
+      .mockResolvedValueOnce({ label: 'Fake model', modelId: 'fake-model', device: 'wasm' });
+    const backend = fakeBackend(
+      vi.fn(() => Promise.resolve('This sentence has enough words.')),
+      'wasm',
+      undefined,
+      load,
+    );
+    const corrector = new Corrector(vi.fn(), () => [() => backend]);
+    await corrector.setConfig(CONFIG);
+
+    await expect(corrector.warmup({ cacheOnly: true })).resolves.toBeUndefined();
+    expect(corrector.getStatus().state).toBe('idle');
+
+    await expect(corrector.correct('This sentence have enough words.')).resolves.toMatchObject({
+      complete: true,
+    });
+    expect(load.mock.calls[0]?.[0]).toEqual(CONFIG);
+    expect(load.mock.calls[0]?.[2]?.cacheOnly).toBe(true);
+    expect(load.mock.calls[0]?.[2]?.signal).toBeInstanceOf(AbortSignal);
+    expect(load.mock.calls[1]?.[0]).toEqual(CONFIG);
+    expect(load.mock.calls[1]?.[2]?.cacheOnly).toBeUndefined();
+    expect(load.mock.calls[1]?.[2]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('does not suspend a runner that became active after an idle cutoff', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const dispose = vi.fn(() => Promise.resolve());
+    const backend = fakeBackend(
+      vi.fn(() => Promise.resolve('text')),
+      'wasm',
+      dispose,
+    );
+    const corrector = new Corrector(vi.fn(), () => [() => backend]);
+    await corrector.setConfig(CONFIG);
+    await corrector.warmup({ cacheOnly: true });
+
+    await expect(corrector.suspend(9_999)).resolves.toBe(false);
+    expect(dispose).not.toHaveBeenCalled();
+
+    vi.setSystemTime(20_000);
+    await expect(corrector.suspend(15_000)).resolves.toBe(true);
+    expect(dispose).toHaveBeenCalledOnce();
+    vi.useRealTimers();
   });
 
   it('clears stale error metadata after a successful retry', async () => {
@@ -259,7 +346,12 @@ describe('Corrector', () => {
     await warming;
     await downloading;
     expect(dispose).toHaveBeenCalledOnce();
-    expect(download).toHaveBeenCalledWith(expect.anything(), expect.any(Function), 'wasm');
+    expect(download).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      'wasm',
+      expect.any(AbortSignal),
+    );
   });
 
   it('reports whether an active runner load matches the onboarding target', async () => {
@@ -384,6 +476,102 @@ describe('Corrector', () => {
       'onnx-community/Qwen3.5-0.8B-ONNX-OPT',
     ]);
     expect(corrector.getDownloadStatuses()).toEqual([]);
+  });
+
+  it('aborts a running superseded onboarding download without closing the runner', async () => {
+    vi.stubGlobal('chrome', {
+      runtime: { sendMessage: vi.fn(() => Promise.resolve()) },
+    });
+    let runningSignal: AbortSignal | undefined;
+    const download = vi.mocked(downloadTransformersModel);
+    download.mockImplementation(
+      (_preset, _onProgress, _device, signal) =>
+        new Promise<void>((resolve) => {
+          runningSignal = signal;
+          signal?.addEventListener('abort', () => resolve(), { once: true });
+        }),
+    );
+    const corrector = new Corrector(vi.fn());
+
+    const obsolete = corrector.downloadModel(
+      'onnx-community/Qwen3-0.6B-ONNX',
+      'wasm',
+      'onboarding',
+    );
+    await vi.waitFor(() => expect(download).toHaveBeenCalledOnce());
+
+    expect(
+      corrector.selectOnboardingTarget('onnx-community/Qwen3.5-0.8B-ONNX-OPT', 'webgpu'),
+    ).toMatchObject({ hasObsoleteRunning: true });
+    await obsolete;
+
+    expect(runningSignal?.aborted).toBe(true);
+    expect(corrector.getDownloadStatuses()).toEqual([]);
+  });
+
+  it('aborts an obsolete runner load through its backend signal', async () => {
+    let loadSignal: AbortSignal | undefined;
+    const load = vi.fn<Backend['load']>(
+      (_config, _onProgress, policy) =>
+        new Promise<LoadedBackend>((_resolve, reject) => {
+          loadSignal = policy?.signal;
+          policy?.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Superseded', 'AbortError')),
+            { once: true },
+          );
+        }),
+    );
+    const backend = fakeBackend(
+      vi.fn(() => Promise.resolve('text')),
+      'wasm',
+      undefined,
+      load,
+    );
+    const corrector = new Corrector(vi.fn(), () => [() => backend]);
+    await corrector.setConfig(CONFIG);
+
+    const warming = corrector.warmup();
+    await vi.waitFor(() => expect(load).toHaveBeenCalledOnce());
+    expect(
+      corrector.selectOnboardingTarget('onnx-community/Qwen3.5-0.8B-ONNX-OPT', 'webgpu'),
+    ).toMatchObject({ hasObsoleteRunnerLoading: true });
+    await warming;
+
+    expect(loadSignal?.aborted).toBe(true);
+    expect(corrector.getStatus().state).toBe('idle');
+  });
+
+  it('never aborts a model load owned by an active grammar check', async () => {
+    let loadSignal: AbortSignal | undefined;
+    let finishLoad: (() => void) | undefined;
+    const load = vi.fn<Backend['load']>(
+      (_config, _onProgress, policy) =>
+        new Promise<LoadedBackend>((resolve) => {
+          loadSignal = policy?.signal;
+          finishLoad = () =>
+            resolve({ label: 'Fake model', modelId: 'fake-model', device: 'wasm' });
+        }),
+    );
+    const backend = fakeBackend(
+      vi.fn(() => Promise.resolve('I have a cat.')),
+      'wasm',
+      undefined,
+      load,
+    );
+    const corrector = new Corrector(vi.fn(), () => [() => backend]);
+    await corrector.setConfig(CONFIG);
+
+    const checking = corrector.correct('I has a cat.');
+    await vi.waitFor(() => expect(load).toHaveBeenCalledOnce());
+    expect(
+      corrector.selectOnboardingTarget('onnx-community/Qwen3.5-0.8B-ONNX-OPT', 'webgpu'),
+    ).toMatchObject({ hasObsoleteRunnerLoading: true });
+    expect(loadSignal?.aborted).toBe(false);
+
+    finishLoad?.();
+    const result = await checking;
+    expect(result.corrections).not.toEqual([]);
   });
 
   it('deletes superseded cache namespaces with the current model', async () => {

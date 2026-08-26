@@ -102,6 +102,10 @@ describe('runtime message validation', () => {
     ).toBe(true);
     expect(isContentMessage({ target: 'content', type: 'gc-ready-probe' })).toBe(true);
     expect(isOffscreenMessage({ target: 'offscreen', type: 'suspend' })).toBe(true);
+    expect(isOffscreenMessage({ target: 'offscreen', type: 'warmup', cacheOnly: true })).toBe(true);
+    expect(isOffscreenMessage({ target: 'offscreen', type: 'warmup', cacheOnly: 'yes' })).toBe(
+      false,
+    );
     expect(isOffscreenMessage({ target: 'offscreen', type: 'device:detect' })).toBe(true);
     expect(isOffscreenMessage({ target: 'offscreen', type: 'downloads:status' })).toBe(true);
     expect(
