@@ -6,7 +6,66 @@ import type { Tooltip, TooltipCallbacks } from './tooltip';
 import { FieldController } from './controller';
 
 describe('FieldController', () => {
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    document.body.replaceChildren();
+  });
+
+  it.each(['password', 'readonly', 'disabled', 'detached'])(
+    'discards an in-flight result without reading the field after it becomes %s',
+    async (state) => {
+      vi.useFakeTimers();
+      const field = document.createElement('input');
+      field.value = 'I has a cat.';
+      document.body.append(field);
+      let complete: ((result: unknown) => void) | undefined;
+      const sendMessage = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            complete = resolve;
+          }),
+      );
+      vi.stubGlobal('chrome', { runtime: { id: 'extension', sendMessage } });
+      const getText = vi.fn(() => field.value);
+      const showCorrections = vi.fn();
+      const clear = vi.fn();
+      const adapter: FieldAdapter = {
+        element: field,
+        kind: 'textinput',
+        getText,
+        showCorrections,
+        clear,
+        rectFor: vi.fn(() => null),
+        correctionRects: () => [],
+        applyEdit: vi.fn(() => true),
+        attach: vi.fn(),
+        destroy: vi.fn(),
+      };
+      const tooltip = { hide: vi.fn() } as unknown as Tooltip;
+      const controller = new FieldController(adapter, DEFAULT_SETTINGS, tooltip);
+      await vi.advanceTimersByTimeAsync(400);
+      expect(sendMessage).toHaveBeenCalledOnce();
+      getText.mockClear();
+      if (state === 'password') field.type = 'password';
+      if (state === 'readonly') field.readOnly = true;
+      if (state === 'disabled') field.disabled = true;
+      if (state === 'detached') field.remove();
+      complete?.({
+        requestId: 'finished',
+        sourceText: 'I has a cat.',
+        corrections: [{ start: 2, end: 5, original: 'has', suggestion: 'have', kind: 'replace' }],
+        nextOffset: 12,
+        complete: true,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(getText).not.toHaveBeenCalled();
+      expect(showCorrections).not.toHaveBeenCalled();
+      expect(clear).toHaveBeenCalled();
+      controller.destroy();
+    },
+  );
 
   it('does not apply a displayed suggestion after a field becomes sensitive', () => {
     vi.useFakeTimers();

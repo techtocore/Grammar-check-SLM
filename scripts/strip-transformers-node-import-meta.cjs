@@ -2,7 +2,10 @@
 
 module.exports = function stripTransformersNodeImportMeta(source) {
   const replacements = [
-    { expression: 'Object(import.meta).url', replacement: 'undefined' },
+    {
+      expression: 'const _import_meta_url = import.meta.url;',
+      replacement: 'const _import_meta_url = undefined;',
+    },
     {
       expression:
         '} else if (typeof import.meta !== "undefined" && import.meta.url) {\n    baseURL = import.meta.url;\n  } else {',

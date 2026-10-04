@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-10-04
+
+### Changed
+
+- Updated Transformers.js to 4.3, including its matched ONNX Runtime assets, and
+  refreshed compatible development tools and transitive dependencies.
+- Moved development to supported Node 22.22.2+, 24.15+, and 26+ releases, with
+  Node 24 recommended and all three release lines covered by CI.
+- Added weekly Dependabot updates, dependency auditing in CI, read-only workflow
+  permissions, bounded job runtimes, and cancellation of superseded CI runs.
+- Kept TypeScript on 6.0 while the lint stack does not yet support TypeScript 7.
+
+### Fixed
+
+- Inline checks discard delayed results when fields become sensitive, read-only,
+  disabled, or detached, before reading their current text.
+- Inline and right-click replacements now share guarded native-input editing,
+  honor cancellation, and never overwrite changes made by page `beforeinput`
+  handlers.
+- Settings-storage failures remain fail-closed and now emit a diagnostic warning.
+- Selection-correction notifications recover when the page removes their DOM
+  and cancel old fade-out timers when a newer notification appears.
+- Updated build metadata adapters for the new inference dependencies, preserving
+  packaged worker/WASM URLs without leaking checkout paths. Added regression
+  checks that reject unexpected upstream changes.
+- Removed obsolete ONNX Runtime assets; the verified production build is now
+  approximately 26.5 MiB instead of 35.7 MiB.
+
 ## [1.2.0] — 2026-08-25
 
 ### Added

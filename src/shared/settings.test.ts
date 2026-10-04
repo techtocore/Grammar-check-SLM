@@ -103,8 +103,18 @@ describe('settings normalization', () => {
 
   it('fails closed when settings storage cannot be read', async () => {
     const storage = installStorage();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     storage.get.mockRejectedValueOnce(new Error('storage unavailable'));
-    await expect(loadSettings()).resolves.toMatchObject({ enabled: false });
+    try {
+      await expect(loadSettings()).resolves.toMatchObject({ enabled: false });
+      expect(warn).toHaveBeenCalledWith(
+        '[GrammarSLM:settings]',
+        expect.stringContaining('grammar checking is disabled'),
+        expect.any(Error),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('serializes concurrent patches so disjoint changes survive', async () => {

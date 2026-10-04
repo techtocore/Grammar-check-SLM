@@ -1,5 +1,8 @@
 import type { DevicePreference } from './models';
 import { AUTO_MODEL, getPreset } from './models';
+import { createLogger } from './logger';
+
+const log = createLogger('settings');
 
 export type SiteMode = 'all' | 'allowlist' | 'denylist';
 
@@ -139,7 +142,11 @@ async function readStoredSettings(): Promise<Settings> {
 export async function loadSettings(): Promise<Settings> {
   try {
     return await readStoredSettings();
-  } catch {
+  } catch (error) {
+    log.warn(
+      'Could not read settings; grammar checking is disabled until storage recovers.',
+      error,
+    );
     return { ...DEFAULT_SETTINGS, enabled: false };
   }
 }

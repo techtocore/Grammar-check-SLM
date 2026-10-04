@@ -6,7 +6,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const buildDir = path.join(root, 'build');
 const maxBuildBytes = 50 * 1024 * 1024;
 const runtimePattern = /ort-wasm-simd-threaded(?:\.(?:asyncify|jsep|jspi))?\.(?:mjs|wasm)/g;
-const localPathPattern = /file:\/\/\/[A-Za-z]:\/|file:\/\/\/(?:Users|home)\//;
+const localPathPattern = /file:\/\/\/(?:[A-Za-z]:\/|[A-Za-z0-9_.-]+\/)/;
 const packageJson = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const manifest = JSON.parse(await readFile(path.join(buildDir, 'manifest.json'), 'utf8'));
 

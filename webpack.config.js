@@ -34,8 +34,8 @@ export default (_env, argv) => {
     module: {
       rules: [
         {
-          // Transformers.js wraps import.meta in Object() inside a Node-only
-          // branch. Webpack serializes that object with the absolute source
+          // Transformers.js reads import.meta.url inside a Node-only
+          // branch. Webpack serializes that URL with the absolute source
           // path even in browser builds, making otherwise identical releases
           // differ by checkout directory. The loader asserts the exact upstream
           // expression before replacing its unused browser value.
@@ -71,12 +71,8 @@ export default (_env, argv) => {
       // Keep deterministic, self-contained entry files (required for MV3).
       splitChunks: false,
       runtimeChunk: false,
-      // Disable scope hoisting. @huggingface/transformers references the whole
-      // `import.meta` object, which webpack synthesizes with an `import.meta.main`
-      // check compiled to `... === __webpack_module__`. Inside a concatenated
-      // (scope-hoisted) module that identifier is never declared, so the offscreen
-      // script throws `__webpack_module__ is not defined` on load. Without
-      // concatenation the check resolves to the real `module` argument instead.
+      // Keep dependency modules isolated; prior Transformers.js builds used
+      // whole import.meta metadata that broke Webpack's scope hoisting.
       concatenateModules: false,
     },
     performance: {
@@ -108,13 +104,8 @@ export default (_env, argv) => {
           { from: 'src/popup/popup.css', to: 'popup.css' },
           { from: 'src/options/options.css', to: 'options.css' },
           { from: 'src/content/content.css', to: 'content.css' },
-          // The locked ONNX Runtime bundle references the plain pair on Safari
-          // and the asyncify pair elsewhere. `scripts/verify-build.mjs` scans all
-          // emitted code and fails if an upgrade introduces another filename.
-          {
-            from: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.{wasm,mjs}',
-            to: 'ort/[name][ext]',
-          },
+          // The locked ONNX Runtime bundle uses the asyncify pair.
+          // `scripts/verify-build.mjs` rejects missing or unused runtime assets.
           {
             from: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.{wasm,mjs}',
             to: 'ort/[name][ext]',

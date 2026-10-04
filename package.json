@@ -1,6 +1,6 @@
 {
   "name": "grammar-check-slm",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Privacy-first, on-device grammar checking browser extension powered by a local Small Language Model (Transformers.js) with WebGPU acceleration.",
   "type": "module",
   "author": "techtocore",
@@ -26,14 +26,14 @@
     "slm"
   ],
   "engines": {
-    "node": ">=20.19"
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
   },
   "scripts": {
     "build": "webpack --mode production && npm run verify:build",
     "dev": "webpack --mode development --watch",
     "verify:build": "node scripts/verify-build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && node --test scripts/build-loaders.test.mjs",
     "test:watch": "vitest",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -43,26 +43,26 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/chrome": "^0.2.6",
-    "@types/node": "^26.2.0",
+    "@types/chrome": "^0.3.4",
+    "@types/node": "^24.19.1",
     "copy-webpack-plugin": "^14.0.0",
-    "eslint": "^10.8.1",
+    "eslint": "^10.12.0",
     "eslint-config-prettier": "^10.1.8",
     "html-webpack-plugin": "^5.6.8",
-    "jsdom": "^29.1.1",
-    "prettier": "^3.9.6",
+    "jsdom": "^30.1.2",
+    "prettier": "^3.9.9",
     "ts-loader": "^9.6.2",
     "typescript": "~6.0.3",
-    "typescript-eslint": "^8.67.0",
-    "vitest": "^4.1.11",
-    "webpack": "^5.109.2",
-    "webpack-cli": "^7.2.2"
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3",
+    "webpack": "^5.111.1",
+    "webpack-cli": "^7.2.3"
   },
   "dependencies": {
-    "@huggingface/transformers": "^4.2.0"
+    "@huggingface/transformers": "^4.3.0"
   },
   "overrides": {
-    "adm-zip": "^0.6.0",
-    "sharp": "^0.35.0"
+    "adm-zip": "^0.6.1",
+    "sharp": "^0.35.5"
   }
 }

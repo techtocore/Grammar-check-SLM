@@ -1,6 +1,8 @@
 import { isBackgroundSender, isContentMessage, type ContentMessage } from '../shared/messages';
 import { createLogger } from '../shared/logger';
 import { replaceContentEditableRange } from './fields/contenteditable-edit';
+import { isTextInput } from './fields/eligibility';
+import { replaceTextInputRange } from './fields/text-input-edit';
 
 const log = createLogger('content');
 
@@ -15,9 +17,10 @@ const pending = new Map<string, SelectionSnapshot | null>();
 
 let toast: HTMLDivElement | null = null;
 let hideTimer: number | null = null;
+let removeTimer: number | null = null;
 
 function ensureToast(): HTMLDivElement {
-  if (toast) return toast;
+  if (toast?.isConnected) return toast;
   const node = document.createElement('div');
   node.className = 'gcslm-toast';
   node.setAttribute('role', 'status');
@@ -31,6 +34,10 @@ function clearHideTimer(): void {
     clearTimeout(hideTimer);
     hideTimer = null;
   }
+  if (removeTimer !== null) {
+    clearTimeout(removeTimer);
+    removeTimer = null;
+  }
 }
 
 function hideToast(delay = 0): void {
@@ -42,7 +49,8 @@ function hideToast(delay = 0): void {
     return;
   }
   node.classList.remove('visible');
-  window.setTimeout(() => {
+  removeTimer = window.setTimeout(() => {
+    removeTimer = null;
     node.remove();
     if (toast === node) toast = null;
   }, 200);
@@ -99,22 +107,6 @@ function showCopyToast(corrected: string): void {
   hideToast(8000);
 }
 
-function setNativeValue(field: TextField, value: string): void {
-  const proto =
-    field instanceof HTMLTextAreaElement
-      ? HTMLTextAreaElement.prototype
-      : HTMLInputElement.prototype;
-  /* eslint-disable @typescript-eslint/unbound-method -- setters are invoked immediately via .call */
-  const prototypeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-  const instanceSetter = Object.getOwnPropertyDescriptor(field, 'value')?.set;
-  /* eslint-enable @typescript-eslint/unbound-method */
-  if (prototypeSetter && prototypeSetter !== instanceSetter) {
-    prototypeSetter.call(field, value);
-  } else {
-    field.value = value;
-  }
-}
-
 function deepActiveElement(): Element | null {
   let active: Element | null = document.activeElement;
   while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
@@ -130,6 +122,7 @@ function editableHost(node: Node): HTMLElement | null {
 function captureSelection(original: string): SelectionSnapshot | null {
   const active = deepActiveElement();
   if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+    if (!isTextInput(active)) return null;
     const start = active.selectionStart;
     const end = active.selectionEnd;
     if (
@@ -166,21 +159,11 @@ function replaceSelection(
     const { field, start, end, value } = snapshot;
     if (!field.isConnected || field.value !== value) return 'stale';
     if (field.value.slice(start, end).trim() !== original.trim()) return 'stale';
-    const next = field.value.slice(0, start) + corrected + field.value.slice(end);
-    setNativeValue(field, next);
-    try {
-      field.setSelectionRange(start, start + corrected.length);
-    } catch {
-      /* some input types disallow selection */
+    if (!isTextInput(field)) return 'stale';
+    if (field.readOnly || field.disabled) return 'noneditable';
+    if (!replaceTextInputRange(field, start, end, value.slice(start, end), corrected, true)) {
+      return 'stale';
     }
-    field.dispatchEvent(
-      new InputEvent('input', {
-        bubbles: true,
-        composed: true,
-        inputType: 'insertReplacementText',
-        data: corrected,
-      }),
-    );
     field.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
     return 'replaced';
   }

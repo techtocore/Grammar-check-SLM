@@ -56,7 +56,8 @@ Content script  ──check──▶  Service worker  ──config──▶  Off
 
 ### Prerequisites
 
-- Node.js 20.19+
+- Node.js **24.15+ recommended** (`.nvmrc` selects Node 24). Also supported: Node 22.22.2+
+  and Node 26+.
 - A Chromium-based browser, version **116+** (for the offscreen + `getContexts` APIs). WebGPU
   (Chrome 113+) is used automatically when available.
 
@@ -140,11 +141,17 @@ npm run typecheck   # tsc --noEmit
 npm run lint        # eslint (flat config)
 npm run test        # vitest (core + DOM mapping)
 npm run format      # prettier
-npm run check       # typecheck + lint + test + build
+npm run check       # formatting + typecheck + lint + test + production build verification
+npm audit           # known dependency advisories
 ```
 
 The core algorithms (diff, segmentation, caching, correction assembly) and the contenteditable
 offset↔DOM mapping are covered by unit tests under `src/**/*.test.ts`.
+
+CI runs the full checks and dependency audit on Node 22, 24, and 26. Dependabot opens weekly
+npm and GitHub Actions update PRs. TypeScript stays on the latest 6.0 patch until
+typescript-eslint supports TypeScript 7; do not bypass its peer-dependency requirements.
+Node typings stay on the recommended Node 24 release line.
 
 ## 🔧 Tech stack
 

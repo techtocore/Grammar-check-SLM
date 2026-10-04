@@ -3,12 +3,16 @@
 module.exports = function stripOnnxBuildPath(source) {
   const replacements = [
     {
-      expression: 'w=import.meta.url,T=""',
-      replacement: 'w=globalThis.location?.href??"",T=""',
+      expression: 'w=import.meta.url,S=""',
+      replacement: 'w=globalThis.location?.href??"",S=""',
     },
     {
-      expression: 'return import.meta.url}},ge=',
-      replacement: 'return globalThis.location?.href??""}},ge=',
+      expression: 'return import.meta.url}},ye=',
+      replacement: 'return globalThis.location?.href??""}},ye=',
+    },
+    {
+      expression: 'new URL(import.meta.url)',
+      replacement: 'new URL("ort.webgpu.bundle.min.mjs",import.meta.url)',
     },
   ];
 
@@ -22,5 +26,13 @@ module.exports = function stripOnnxBuildPath(source) {
     }
     output = output.replace(expression, replacement);
   }
+  const fileUrlCheck = 'import.meta.url>"file:"&&import.meta.url<"file;"';
+  const fileUrlChecks = output.split(fileUrlCheck).length - 1;
+  if (fileUrlChecks !== 2) {
+    throw new Error(
+      `Expected two file URL checks in ONNX Runtime, found ${fileUrlChecks}. Review the dependency upgrade.`,
+    );
+  }
+  output = output.replaceAll(fileUrlCheck, 'globalThis.location?.protocol==="file:"');
   return output;
 };

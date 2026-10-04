@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContentMessage } from '../shared/messages';
 import { installExecCommand } from './exec-command.test-helper';
 import { initSelectionCorrection } from './selection';
@@ -17,6 +17,7 @@ function send(message: ContentMessage): void {
 
 describe('selection correction', () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     document.body.replaceChildren();
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       callback(0);
@@ -33,6 +34,31 @@ describe('selection correction', () => {
       },
     });
     initSelectionCorrection();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps a new correction toast visible when an earlier toast was fading out', () => {
+    send({
+      type: 'gc-correct-result',
+      target: 'content',
+      requestId: 'unchanged',
+      original: 'A good sentence.',
+      corrected: 'A good sentence.',
+    });
+    vi.advanceTimersByTime(2000);
+    send({
+      type: 'gc-correcting',
+      target: 'content',
+      requestId: 'new-check',
+      original: 'I has a cat.',
+    });
+    vi.advanceTimersByTime(300);
+
+    expect(document.querySelector('.gcslm-toast-spinner')).not.toBeNull();
   });
 
   it('applies a result to the original field after focus moves', () => {
@@ -95,6 +121,73 @@ describe('selection correction', () => {
     });
 
     expect(field.value).toBe('I already fixed this.');
+  });
+
+  it.each(['readonly', 'disabled', 'password', 'cancelled', 'edited'])(
+    'does not replace selected text when the field becomes %s',
+    (state) => {
+      const field = document.createElement('input');
+      field.value = 'I has a cat.';
+      document.body.append(field);
+      field.focus();
+      field.setSelectionRange(0, field.value.length);
+      send({
+        type: 'gc-correcting',
+        target: 'content',
+        requestId: `blocked-${state}`,
+        original: field.value,
+      });
+      if (state === 'readonly') field.readOnly = true;
+      if (state === 'disabled') field.disabled = true;
+      if (state === 'password') field.type = 'password';
+      field.addEventListener('beforeinput', (event) => {
+        if (state === 'cancelled') event.preventDefault();
+        if (state === 'edited') field.value = 'A newer draft.';
+      });
+      const onInput = vi.fn();
+      const onChange = vi.fn();
+      field.addEventListener('input', onInput);
+      field.addEventListener('change', onChange);
+      send({
+        type: 'gc-correct-result',
+        target: 'content',
+        requestId: `blocked-${state}`,
+        original: 'I has a cat.',
+        corrected: 'I have a cat.',
+      });
+
+      expect(field.value).toBe(state === 'edited' ? 'A newer draft.' : 'I has a cat.');
+      expect(onInput).not.toHaveBeenCalled();
+      expect(onChange).not.toHaveBeenCalled();
+      if (state === 'readonly' || state === 'disabled') {
+        expect(document.querySelector('.gcslm-toast-btn')?.textContent).toBe('Copy');
+      }
+    },
+  );
+
+  it('offers copying rather than editing a selection from a read-only field', () => {
+    const field = document.createElement('textarea');
+    field.value = 'I has a cat.';
+    field.readOnly = true;
+    document.body.append(field);
+    field.focus();
+    field.setSelectionRange(0, field.value.length);
+    send({
+      type: 'gc-correcting',
+      target: 'content',
+      requestId: 'readonly-selection',
+      original: field.value,
+    });
+    send({
+      type: 'gc-correct-result',
+      target: 'content',
+      requestId: 'readonly-selection',
+      original: 'I has a cat.',
+      corrected: 'I have a cat.',
+    });
+
+    expect(field.value).toBe('I has a cat.');
+    expect(document.querySelector('.gcslm-toast-btn')?.textContent).toBe('Copy');
   });
 
   it('replaces a selected word once in a WhatsApp Lexical editor', () => {

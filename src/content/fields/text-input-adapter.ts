@@ -3,6 +3,7 @@ import type { CorrectionRect, FieldAdapter, FieldHandlers, FieldKind } from './t
 import { Overlay } from '../highlighter';
 import { rafThrottle, type RafThrottle } from '../schedule';
 import { isElementVisible } from './visibility';
+import { replaceTextInputRange } from './text-input-edit';
 
 type TextField = HTMLInputElement | HTMLTextAreaElement;
 
@@ -25,22 +26,6 @@ const MIRROR_STYLE_PROPS = [
   'lineHeight',
   'tabSize',
 ] as const;
-
-function setNativeValue(field: TextField, value: string): void {
-  const proto =
-    field instanceof HTMLTextAreaElement
-      ? HTMLTextAreaElement.prototype
-      : HTMLInputElement.prototype;
-  /* eslint-disable @typescript-eslint/unbound-method -- setters are invoked immediately via .call */
-  const prototypeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-  const instanceSetter = Object.getOwnPropertyDescriptor(field, 'value')?.set;
-  /* eslint-enable @typescript-eslint/unbound-method */
-  if (prototypeSetter && prototypeSetter !== instanceSetter) {
-    prototypeSetter.call(field, value);
-  } else {
-    field.value = value;
-  }
-}
 
 interface MeasureContext {
   computed: CSSStyleDeclaration;
@@ -105,51 +90,7 @@ export class TextInputAdapter implements FieldAdapter {
   }
 
   applyEdit(start: number, end: number, expectedOriginal: string, suggestion: string): boolean {
-    const value = this.field.value;
-    if (start < 0 || end > value.length || start > end) return false;
-    if (value.slice(start, end) !== expectedOriginal) return false;
-
-    const before = new InputEvent('beforeinput', {
-      bubbles: true,
-      composed: true,
-      cancelable: true,
-      inputType: 'insertReplacementText',
-      data: suggestion,
-    });
-    if (!this.field.dispatchEvent(before)) return false;
-
-    const selectionStart = this.field.selectionStart;
-    const selectionEnd = this.field.selectionEnd;
-    const selectionDirection = this.field.selectionDirection;
-    const next = value.slice(0, start) + suggestion + value.slice(end);
-    setNativeValue(this.field, next);
-    if (selectionStart !== null && selectionEnd !== null) {
-      const delta = suggestion.length - (end - start);
-      const adjust = (position: number): number => {
-        if (position < start) return position;
-        if (position > end || position === end) return position + delta;
-        if (position === start) return start;
-        return start + suggestion.length;
-      };
-      try {
-        this.field.setSelectionRange(
-          adjust(selectionStart),
-          adjust(selectionEnd),
-          selectionDirection ?? undefined,
-        );
-      } catch {
-        /* some input types disallow selection */
-      }
-    }
-    this.field.dispatchEvent(
-      new InputEvent('input', {
-        bubbles: true,
-        composed: true,
-        inputType: 'insertReplacementText',
-        data: suggestion,
-      }),
-    );
-    return true;
+    return replaceTextInputRange(this.field, start, end, expectedOriginal, suggestion);
   }
 
   attach(handlers: FieldHandlers): void {

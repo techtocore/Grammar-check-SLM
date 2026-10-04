@@ -141,6 +141,14 @@ export class FieldController {
       }
 
       if (this.destroyed || seq !== this.requestSeq) return;
+      if (
+        !this.adapter.element.isConnected ||
+        fieldKindFor(this.adapter.element, this.settings) !== this.adapter.kind
+      ) {
+        this.tooltip.hide();
+        this.setCorrections([]);
+        return;
+      }
       // Discard if the field changed while we were waiting.
       if (this.adapter.getText() !== result.sourceText) return;
 
